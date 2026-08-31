@@ -1,0 +1,141 @@
+// ZigOS build entry point.
+//
+// Usage:
+//   zig build              build everything (bootloader + kernel + ramdisk + ISO)
+//   zig build bootloader   build only the UEFI bootloader (boot/EFI/BOOT/BOOTX64.EFI)
+//   zig build kernel       build only the kernel (boot/zigos.elf)
+//   zig build ramdisk      build only the FTFS ramdisk image (boot/ramdisk.bin)
+//   zig build iso          build the bootable ISO (zigos.iso)
+//
+// Requirements: Zig 0.14.x, xorriso and mtools (mmd/mcopy) for ISO
+// creation, Python 3 for the FTFS image maker, OVMF (qemu) or real UEFI
+// firmware for verification.
+//
+// The bootloader is a plain zig executable for the x86_64-uefi target:
+// `pub fn main() callconv(.Uefi)` is mapped to the EFI entry point by the
+// compiler. The kernel is freestanding and links through zig ld.lld with
+// the project linker script; its ISR stubs are assembled separately with
+// zig cc because the object builder cannot parse assembler directives.
+// ISO assembly (FAT image + El Torito embedding) is delegated to
+// build_iso.sh, which encodes mtools and xorriso quirks.
+
+const std = @import("std");
+
+const uefi_target = std.Target.Query{
+    .cpu_arch = .x86_64,
+    .os_tag = .uefi,
+    .ofmt = .coff,
+};
+
+const freestanding_target = std.Target.Query{
+    .cpu_arch = .x86_64,
+    .os_tag = .freestanding,
+    .ofmt = .coff,
+};
+
+pub fn build(b: *std.Build) void {
+    const uefi = b.resolveTargetQuery(uefi_target);
+    const freestanding = b.resolveTargetQuery(freestanding_target);
+
+    // ---------- Bootloader ----------
+    const boot_exe = b.addExecutable(.{
+        .name = "BOOTX64",
+        .root_source_file = b.path("src/bootloader/main.zig"),
+        .target = uefi,
+        .optimize = .ReleaseSmall,
+        .code_model = .default,
+        .link_libc = false,
+    });
+    const efi_out = boot_exe.getEmittedBin();
+    const install_efi = b.addInstallFile(efi_out, "boot/EFI/BOOT/BOOTX64.EFI");
+
+    // ---------- Kernel ----------
+    const kernel_main_obj = b.addObject(.{
+        .name = "kernel_main",
+        .root_source_file = b.path("src/kernel/build_root.zig"),
+        .target = freestanding,
+        .optimize = .ReleaseSmall,
+        .code_model = .kernel,
+        .link_libc = false,
+        .strip = true,
+    });
+
+    // ISR stubs: zig cc cannot be driven as a Compile step for bare
+    // assembly, so it runs as a system command.
+    const compile_isr = b.addSystemCommand(&.{
+        "zig", "cc",
+        "-target", "x86_64-freestanding",
+        "-mcpu=nehalem",
+        "-c", "src/kernel/arch/isr_stub.S",
+    });
+    compile_isr.addArg("-o");
+    const isr_out = compile_isr.addOutputFileArg("isr.zig.o");
+
+    const link_kernel = b.addSystemCommand(&.{
+        "zig", "ld.lld",
+        "-T", "src/kernel/linker.ld",
+        "--entry=_start",
+    });
+    link_kernel.addArtifactArg(kernel_main_obj);
+    link_kernel.addFileArg(isr_out);
+    link_kernel.addArg("-o");
+    const elf_out = link_kernel.addOutputFileArg("zigos.zig.elf");
+    link_kernel.step.dependOn(&compile_isr.step);
+    const install_elf = b.addInstallFile(elf_out, "boot/zigos.elf");
+    install_elf.step.dependOn(&link_kernel.step);
+
+    // ---------- Ramdisk ----------
+    const mkftfs = b.addSystemCommand(&.{ "python3", "tools/mkftfs.py" });
+    const bin_out = mkftfs.addOutputFileArg("ramdisk.zig.bin");
+    const install_bin = b.addInstallFile(bin_out, "boot/ramdisk.bin");
+    install_bin.step.dependOn(&mkftfs.step);
+
+    // ---------- ISO ----------
+    // FAT image assembly is delegated to build_iso.sh, the proven pipeline.
+    // This step stages the three artifacts at the paths build_iso.sh
+    // expects (/tmp/zigboot_new.efi, ./zigos.elf, /tmp/ramdisk.bin) and
+    // then runs it.
+    const stage_efi = b.addSystemCommand(&.{ "cp", "-f" });
+    stage_efi.addFileArg(efi_out);
+    stage_efi.addArg("/tmp/zigboot_new.efi");
+    stage_efi.step.dependOn(&install_efi.step);
+
+    const stage_elf = b.addSystemCommand(&.{ "cp", "-f" });
+    stage_elf.addFileArg(elf_out);
+    stage_elf.addArg("zigos.elf");
+    stage_elf.step.dependOn(&install_elf.step);
+
+    const stage_bin = b.addSystemCommand(&.{ "cp", "-f" });
+    stage_bin.addFileArg(bin_out);
+    stage_bin.addArg("/tmp/ramdisk.bin");
+    stage_bin.step.dependOn(&install_bin.step);
+
+    const make_iso = b.addSystemCommand(&.{ "bash", "build_iso.sh" });
+    make_iso.step.dependOn(&stage_efi.step);
+    make_iso.step.dependOn(&stage_elf.step);
+    make_iso.step.dependOn(&stage_bin.step);
+    const iso_out = make_iso.addOutputFileArg("zigos.zig.iso");
+    const install_iso = b.addInstallFile(iso_out, "zigos.iso");
+    install_iso.step.dependOn(&make_iso.step);
+
+    // ---------- Steps ----------
+    const boot_step = b.step("bootloader", "Build the UEFI bootloader");
+    boot_step.dependOn(&install_efi.step);
+
+    const kern_step = b.step("kernel", "Build the kernel ELF");
+    kern_step.dependOn(&install_elf.step);
+
+    const ram_step = b.step("ramdisk", "Build the FTFS ramdisk image");
+    ram_step.dependOn(&install_bin.step);
+
+    const iso_step = b.step("iso", "Build the bootable ISO image");
+    iso_step.dependOn(&install_iso.step);
+
+    const all = b.step("all", "Build bootloader, kernel, ramdisk and ISO");
+    all.dependOn(&install_efi.step);
+    all.dependOn(&install_elf.step);
+    all.dependOn(&install_bin.step);
+    all.dependOn(&install_iso.step);
+
+    b.default_step = all;
+}
