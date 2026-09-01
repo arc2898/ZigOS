@@ -53,10 +53,10 @@ var wallpaper_buf: [1024 * 768]u32 = undefined;
 var cursor_buf: [32 * 32]u32 = undefined;
 
 // --- Syscall Wrappers ---
-fn syscall0(nr: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr) : .{ .rcx = true, .r11 = true, .memory = true }); }
-fn syscall1(nr: u64, a1: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr), [a1] "{rdi}" (a1) : .{ .rcx = true, .r11 = true, .memory = true }); }
-fn syscall2(nr: u64, a1: u64, a2: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr), [a1] "{rdi}" (a1), [a2] "{rsi}" (a2) : .{ .rcx = true, .r11 = true, .memory = true }); }
-fn syscall3(nr: u64, a1: u64, a2: u64, a3: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr), [a1] "{rdi}" (a1), [a2] "{rsi}" (a2), [a3] "{rdx}" (a3) : .{ .rcx = true, .r11 = true, .memory = true }); }
+fn syscall0(nr: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr) : "rcx", "r11", "memory"); }
+fn syscall1(nr: u64, a1: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr), [a1] "{rdi}" (a1) : "rcx", "r11", "memory"); }
+fn syscall2(nr: u64, a1: u64, a2: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr), [a1] "{rdi}" (a1), [a2] "{rsi}" (a2) : "rcx", "r11", "memory"); }
+fn syscall3(nr: u64, a1: u64, a2: u64, a3: u64) u64 { return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (nr), [a1] "{rdi}" (a1), [a2] "{rsi}" (a2), [a3] "{rdx}" (a3) : "rcx", "r11", "memory"); }
 
 fn sys_exit(status: u64) noreturn { _ = syscall1(0, status); while (true) {} }
 fn sys_write(fd: u32, s: []const u8) void { _ = syscall3(1, fd, @intFromPtr(s.ptr), s.len); }

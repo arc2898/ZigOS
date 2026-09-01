@@ -7,45 +7,45 @@ const WIN_W = 300;
 const WIN_H = 200;
 
 fn sys_exit(status: u64) noreturn {
-    asm volatile ("syscall" : : [nr] "{rax}" (@as(u64, 0)), [arg1] "{rdi}" (status) : .{ .rcx = true, .r11 = true, .memory = true });
+    asm volatile ("syscall" : : [nr] "{rax}" (@as(u64, 0)), [arg1] "{rdi}" (status) : "rcx", "r11", "memory");
     while (true) {}
 }
 
 fn sys_ipc_send(port: []const u8, msg: *const types.Message) bool {
     var buf: [16]u8 = [_]u8{0} ** 16;
     for (port, 0..) |c, i| { if (i < 16) buf[i] = c; }
-    const res = asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 24)), [arg1] "{rdi}" (@intFromPtr(&buf)), [arg2] "{rsi}" (@intFromPtr(msg)) : .{ .rcx = true, .r11 = true, .memory = true });
+    const res = asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 24)), [arg1] "{rdi}" (@intFromPtr(&buf)), [arg2] "{rsi}" (@intFromPtr(msg)) : "rcx", "r11", "memory");
     return res == 0;
 }
 
 fn sys_register_port(name: []const u8) bool {
     var buf: [16]u8 = [_]u8{0} ** 16;
     for (name, 0..) |c, i| { if (i < 16) buf[i] = c; }
-    const res = asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 29)), [arg1] "{rdi}" (@intFromPtr(&buf)) : .{ .rcx = true, .r11 = true, .memory = true });
+    const res = asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 29)), [arg1] "{rdi}" (@intFromPtr(&buf)) : "rcx", "r11", "memory");
     return res == 0;
 }
 
 fn sys_get_pid() u32 {
-    return @as(u32, @intCast(asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 10)) : .{ .rcx = true, .r11 = true, .memory = true })));
+    return @as(u32, @intCast(asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 10)) : "rcx", "r11", "memory")));
 }
 
 fn sys_get_time_ms() u64 {
-    return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (@as(u64, 31)) : .{ .rcx = true, .r11 = true, .memory = true });
+    return asm volatile ("syscall" : [ret] "={rax}" (-> u64) : [nr] "{rax}" (@as(u64, 31)) : "rcx", "r11", "memory");
 }
 
 fn sys_ipc_recv(port: []const u8, msg: *types.Message, is_async: bool) bool {
     var buf: [16]u8 = [_]u8{0} ** 16;
     for (port, 0..) |c, i| { if (i < 16) buf[i] = c; }
-    const res = asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 25)), [arg1] "{rdi}" (@intFromPtr(&buf)), [arg2] "{rsi}" (@intFromPtr(msg)), [arg3] "{rdx}" (@as(u64, if (is_async) 1 else 0)) : .{ .rcx = true, .r11 = true, .memory = true });
+    const res = asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 25)), [arg1] "{rdi}" (@intFromPtr(&buf)), [arg2] "{rsi}" (@intFromPtr(msg)), [arg3] "{rdx}" (@as(u64, if (is_async) 1 else 0)) : "rcx", "r11", "memory");
     return res == 0;
 }
 
 fn sys_shm_create(size: usize) i64 {
-    return asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 26)), [arg1] "{rdi}" (size) : .{ .rcx = true, .r11 = true, .memory = true });
+    return asm volatile ("syscall" : [ret] "={rax}" (-> i64) : [nr] "{rax}" (@as(u64, 26)), [arg1] "{rdi}" (size) : "rcx", "r11", "memory");
 }
 
 fn sys_shm_map(id: i64) usize {
-    return asm volatile ("syscall" : [ret] "={rax}" (-> usize) : [nr] "{rax}" (@as(u64, @intCast(id))) : .{ .rcx = true, .r11 = true, .memory = true });
+    return asm volatile ("syscall" : [ret] "={rax}" (-> usize) : [nr] "{rax}" (@as(u64, @intCast(id))) : "rcx", "r11", "memory");
 }
 
 fn draw_rect(x: u32, y: u32, w: u32, h: u32, color: u32) void {
