@@ -14,6 +14,12 @@ Prerequisites:
 Build and run (example):
 
 ```bash
+# Clone Repo
+git clone https://github.com/arc2898/ZigOS
+cd ZigOS
+
+# You can build this in any Operating System
+
 # Build (project may provide a build script or Zig build settings)
 zig build
 
