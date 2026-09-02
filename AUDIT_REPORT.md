@@ -239,3 +239,7 @@ build_iso.sh:28:mcopy -i "$ESP_IMG" "$STAGING/ramdisk.bin" ::/ramdisk.bin
 ## VM visual verification
 
 The final ISO reached `kernel_main`, entered the scheduler loop, rendered a 1280×800 framebuffer, and passed the updated smoke-test criterion. The screenshot shows a working desktop background, taskbar, clock, cursor, text labels, and all requested desktop icons. The former missing icon assets (`icon_computer.raw`, `icon_network.raw`, `icon_trash.raw`, and `icon_zide.raw`) are now generated deterministically and resolved successfully. The legacy GUI-halt marker is not used by the production image, so the smoke test now validates kernel and scheduler milestones plus framebuffer capture.
+
+## Continued input improvement
+
+The HID boot-keyboard path now compares consecutive eight-byte reports. Held keys no longer flood the IPC queue with duplicate key-down events, and keys removed from a report generate a corresponding key-up event. State is reset when the HID module initializes. The HID-enhanced image rebuilt successfully, reached the scheduler loop in QEMU, captured the framebuffer, and resolved all seven requested desktop icons without errors.

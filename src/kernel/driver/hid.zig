@@ -146,6 +146,7 @@ pub const MouseButton = struct {
 };
 
 var modifier_state: ModifierFlags = .{};
+var previous_keys: [6]u8 = [_]u8{0} ** 6;
 var kb_active: bool = false;
 var mouse_active: bool = false;
 
@@ -201,13 +202,39 @@ pub fn handle_keyboard_report(report: []const u8) void {
     if (diff & 0x80 != 0) push_key(.rmeta, mods.rmeta);
     modifier_state = mods;
 
-    // Keycodes occupy bytes 2..7; a zero means the slot is empty.
-    var idx: usize = 2;
-    while (idx < 8) : (idx += 1) {
-        if (report[idx] != 0) {
-            const code: KeyCode = @enumFromInt(report[idx]);
-            push_key(code, true);
+    // Keycodes occupy bytes 2..7. Compare reports so a held key does not
+    // flood the IPC queue with duplicate key-down events, while releases are
+    // still delivered even when the device reports an empty slot.
+    var old_idx: usize = 0;
+    while (old_idx < previous_keys.len) : (old_idx += 1) {
+        const old_code = previous_keys[old_idx];
+        if (old_code == 0) continue;
+        var still_pressed = false;
+        var new_idx: usize = 2;
+        while (new_idx < 8) : (new_idx += 1) {
+            if (report[new_idx] == old_code) {
+                still_pressed = true;
+                break;
+            }
         }
+        if (!still_pressed) push_key(@enumFromInt(old_code), false);
+    }
+
+    var new_slot: usize = 0;
+    while (new_slot < previous_keys.len) : (new_slot += 1) {
+        const new_code = report[new_slot + 2];
+        if (new_code == 0) continue;
+        var was_pressed = false;
+        for (previous_keys) |old_code| {
+            if (old_code == new_code) {
+                was_pressed = true;
+                break;
+            }
+        }
+        if (!was_pressed) push_key(@enumFromInt(new_code), true);
+    }
+    for (0..previous_keys.len) |slot| {
+        previous_keys[slot] = report[slot + 2];
     }
 }
 
@@ -284,6 +311,8 @@ fn ipc_broadcast_input(msg: *const Message) void {
 
 pub fn init_module(sender: u32) bool {
     _ = sender;
+    previous_keys = [_]u8{0} ** 6;
+    modifier_state = .{};
     _ = xhci.init_module(0);
     kb_active = true;
     mouse_active = true;
