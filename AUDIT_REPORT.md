@@ -243,3 +243,13 @@ The final ISO reached `kernel_main`, entered the scheduler loop, rendered a 1280
 ## Continued input improvement
 
 The HID boot-keyboard path now compares consecutive eight-byte reports. Held keys no longer flood the IPC queue with duplicate key-down events, and keys removed from a report generate a corresponding key-up event. State is reset when the HID module initializes. The HID-enhanced image rebuilt successfully, reached the scheduler loop in QEMU, captured the framebuffer, and resolved all seven requested desktop icons without errors.
+
+## GUI input-routing milestone
+
+The GUI compositor now forwards keyboard key-down/key-up events and mouse move/button events to the currently focused application port (`app_<owner_id>`), while retaining compositor-side pointer, window, and start-menu handling. Creating a new window clears focus from older windows before assigning focus to the new owner. This closes the previous event-routing gap where input reached the kernel and compositor but was not delivered to focused applications.
+
+The updated image rebuilt successfully and passed the QEMU boot, scheduler, framebuffer, and desktop-asset regression test. A complete physical keyboard/mouse acceptance test still requires an input-injection harness or the actual device; QEMU startup success alone does not prove physical Bluetooth HID behavior.
+
+## Current scope note
+
+Bluetooth is intentionally limited to HID keyboard and HID mouse input. Bluetooth transfer, audio, networking, and arbitrary-device services are out of scope.

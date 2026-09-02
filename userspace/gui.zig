@@ -93,6 +93,16 @@ fn sys_register_port(port: []const u8) bool {
     @memcpy(buf[0..len], port[0..len]);
     return syscall1(29, @intFromPtr(&buf)) == 0;
 }
+
+fn forward_input(msg: *const types.Message) void {
+    for (windows) |win| {
+        if (!win.active or !win.focused) continue;
+        var port: [16]u8 = [_]u8{0} ** 16;
+        const name = std.fmt.bufPrint(&port, "app_{d}", .{win.owner_id}) catch return;
+        _ = sys_ipc_send(name, msg);
+        return;
+    }
+}
 fn sys_get_fb_info(info: *types.FramebufferInfo) bool {
     return syscall1(30, @intFromPtr(info)) == 0;
 }
@@ -228,6 +238,7 @@ export fn main() callconv(.{ .x86_64_sysv = .{} }) noreturn {
                     var idx: usize = 0;
                     while (idx < MAX_WINDOWS) : (idx += 1) {
                         if (!windows[idx].active) {
+                            for (&windows) |*existing| existing.focused = false;
                             windows[idx].active = true;
                             windows[idx].x = @as(i32, @intCast(req.x));
                             windows[idx].y = @as(i32, @intCast(req.y));
@@ -280,7 +291,11 @@ export fn main() callconv(.{ .x86_64_sysv = .{} }) noreturn {
                         }
                     }
                 },
+                types.INPUT_KEY_DOWN, types.INPUT_KEY_UP => {
+                    forward_input(&msg);
+                },
                 types.INPUT_MOUSE_MOVE => {
+                    forward_input(&msg);
                     const req = @as(*const types.MouseMoveEvent, @ptrCast(@alignCast(&msg.payload))).*;
                     mouse_x += req.dx;
                     mouse_y += req.dy;
@@ -299,6 +314,7 @@ export fn main() callconv(.{ .x86_64_sysv = .{} }) noreturn {
                     }
                 },
                 types.INPUT_MOUSE_BUTTON => {
+                    forward_input(&msg);
                     const req = @as(*const types.MouseButtonEvent, @ptrCast(@alignCast(&msg.payload))).*;
                     if (req.button == 1) {
                         mouse_l_down = req.pressed;
