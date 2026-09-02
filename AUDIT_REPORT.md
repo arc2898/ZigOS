@@ -253,3 +253,32 @@ The updated image rebuilt successfully and passed the QEMU boot, scheduler, fram
 ## Current scope note
 
 Bluetooth is intentionally limited to HID keyboard and HID mouse input. Bluetooth transfer, audio, networking, and arbitrary-device services are out of scope.
+
+## Capability matrix (2026-09-02)
+
+| Capability | Status | Evidence and boundary |
+|---|---|---|
+| Keyboard/mouse event de-duplication and key release | Implemented | HID boot reports compare consecutive state and emit transitions; QEMU boot confirms scheduler entry. Physical acceptance remains outstanding. |
+| GUI focus and focused-application input routing | Implemented | Compositor routes keyboard and mouse events to the focused application port; no physical-input claim is made. |
+| File-manager root listing | Implemented and emulated-and-tested | `userspace/fm.zig` reads bounded 88-byte FTFS entries; rebuilt ramdisk validation and QEMU asset reads pass. |
+| File-manager nested navigation and parent traversal | Implemented | Enter opens directories, Backspace returns to the parent, and file launches use the current bounded path. Interactive injection is not available in the current QEMU harness. |
+| File-manager create/write/rename/delete workflow | Not-yet-implemented in GUI | Kernel/VFS primitives exist, but no user-facing workflow or end-to-end acceptance harness verifies these operations. |
+| FTFS on-disk format and packaged reads | Emulated-and-tested | Ramdisk validates as FTFS v2 with 4096-byte blocks; QEMU reads packaged assets. |
+| VFS, IPC rings, block-device boundaries | Partially implemented; not fully audited | Existing source paths are present, but this run did not claim complete hardening. |
+| XHCI/USB 3 HID keyboard/mouse | Hardware-dependent | QEMU and source surfaces exist, but no HID report injection or physical USB evidence was collected. |
+| Bluetooth HID keyboard/mouse | Hardware-dependent | Scope is HID input only; transfer, audio, networking, and arbitrary services remain out of scope. |
+| Wi-Fi, USB tethering, and MTP | Not-yet-implemented / separately gated | No protocol-correct bounded implementation or hardware evidence was attempted. |
+| Bootloader, kernel, display manager/login, desktop | Emulated-and-tested | Full build completed; QEMU reached `kernel_main`, scheduler entry, and framebuffer capture. |
+| Package manager, notepad, IDE, settings, system monitor, terminal | Packaged; interactive coverage incomplete | Applications are present in the image, but this run did not claim acceptance for each. |
+
+## Focused run evidence
+
+The focused change makes file-manager navigation bounded and stateful. It preserves the 50-entry and 64-byte-name limits, rejects paths exceeding the 256-byte syscall validation limit, avoids indexing a selection in an empty directory, and launches files using their current directory path. `zig build`, `zig fmt --check userspace/fm.zig`, Python compilation, FTFS validation, and the QEMU smoke harness passed. QEMU evidence is emulation-only and does not prove physical Bluetooth, Wi-Fi, tethering, MTP, or user-specific USB-dongle behavior.
+
+## Prioritized continuation plan
+
+1. Add deterministic QEMU input injection for directory open, parent traversal, and file launch.
+2. Implement and test one VFS-backed file-manager write path, then add rename/delete after read-after-write and on-disk validation pass.
+3. Audit FTFS allocation, deletion, inode checksums, and block bounds with malformed-image tests.
+4. Separately audit XHCI HID, Bluetooth HID, Wi-Fi, USB tethering, and MTP with protocol-specific evidence.
+5. Continue boot/login and desktop utility surfaces after file-manager and storage acceptance are stable.
