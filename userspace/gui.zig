@@ -314,9 +314,10 @@ export fn main() callconv(.{ .x86_64_sysv = .{} }) noreturn {
                     }
                 },
                 types.INPUT_MOUSE_BUTTON => {
-                    forward_input(&msg);
                     const req = @as(*const types.MouseButtonEvent, @ptrCast(@alignCast(&msg.payload))).*;
-                    if (req.button == 1) {
+                    if (req.button != 1) {
+                        forward_input(&msg);
+                    } else {
                         mouse_l_down = req.pressed;
                         if (req.pressed) {
                             const ty = @as(i32, @intCast(fb_info.height - 40));
@@ -353,12 +354,14 @@ export fn main() callconv(.{ .x86_64_sysv = .{} }) noreturn {
                                         drag_off_x = mouse_x - win.x;
                                         drag_off_y = mouse_y - win.y;
                                         clicked_win = true;
+                                        forward_input(&msg);
                                         break;
                                     }
                                     if (mouse_x >= win.x and mouse_x <= win.x + @as(i32, @intCast(win.width)) and mouse_y >= win.y and mouse_y <= win.y + @as(i32, @intCast(win.height))) {
                                         for (&windows) |*w| { w.focused = false; }
                                         win.focused = true;
                                         clicked_win = true;
+                                        forward_input(&msg);
                                         break;
                                     }
                                 }
@@ -366,6 +369,8 @@ export fn main() callconv(.{ .x86_64_sysv = .{} }) noreturn {
                             }
                         } else {
                             drag_window_idx = null;
+                            // Button release follows the focus established by the press.
+                            forward_input(&msg);
                         }
                     }
                 },
