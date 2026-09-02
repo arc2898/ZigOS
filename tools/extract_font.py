@@ -4,6 +4,7 @@ import re
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "userspace" / "font.zig"
 OUTPUT = ROOT / "assets" / "font.raw"
+OUTPUT.parent.mkdir(parents=True, exist_ok=True)
 
 with SOURCE.open("r", encoding="utf-8") as f:
     content = f.read()

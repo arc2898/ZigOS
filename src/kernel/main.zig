@@ -1,6 +1,6 @@
 // ZigOS Baseline Recovery Kernel
 const std = @import("std");
-const boot_abi = @import("boot_abi.zig");
+const boot_abi = @import("boot_abi");
 const serial = @import("driver/serial.zig");
 const pmem = @import("mm/physical.zig");
 const vmm = @import("mm/virtual.zig");
@@ -27,17 +27,34 @@ pub fn get_boot_info() *boot_abi.BootInfo {
     return boot_info;
 }
 
+fn enable_sse() void {
+    asm volatile (
+        \\mov %%cr0, %%rax
+        \\and $0xFFFFFFFFFFFFFFFB, %%rax
+        \\or $0x2, %%rax
+        \\mov %%rax, %%cr0
+        \\mov %%cr4, %%rax
+        \\or $0x600, %%rax
+        \\mov %%rax, %%cr4
+        :
+        :
+        : "rax", "memory"
+    );
+}
+
 pub export fn kernel_main(info: *boot_abi.BootInfo) callconv(.{ .x86_64_sysv = .{} }) noreturn {
     serial.init();
     boot_info = info;
+    const boot_info_phys = @intFromPtr(info);
     serial.log("ZigOS: kernel_main reached\n");
     // Initialize core subsystems
     
     // 1. GDT & TSS & IDT (Interrupts and Descriptors)
     const gdt = @import("arch/gdt.zig");
     const idt = @import("arch/idt.zig");
-    gdt.init(0, 0, 0);
+    gdt.init(0, gdt.interrupt_stack_top(), 0);
     gdt.loadTr(gdt.SEL_TSS);
+    enable_sse();
     idt.init();
 
     sched.init();
@@ -63,6 +80,10 @@ pub export fn kernel_main(info: *boot_abi.BootInfo) callconv(.{ .x86_64_sysv = .
     vmm.switch_cr3(kernel_cr3);
     vmm.vmm_active = true;
     pmem.vmm_active = true;
+    // User processes run with their own CR3 and only retain the kernel's
+    // high-half direct map. Keep global kernel metadata addressable there;
+    // the original low identity pointer is not present in user CR3s.
+    boot_info = @ptrFromInt(pmem.phys_to_virt(boot_info_phys));
     serial.log("ZigOS: VMM active\n");
 
     const shm = @import("mm/shm.zig");
@@ -126,14 +147,20 @@ pub export fn kernel_main(info: *boot_abi.BootInfo) callconv(.{ .x86_64_sysv = .
     // 5. Spawn init process and enter scheduler
     serial.log("ZigOS: Spawning init.\n");
     const elf = @import("elf.zig");
-    _ = elf.load_and_spawn("/test_ring3.elf", "init", 1) catch {
-        serial.log("ZigOS: Failed to spawn init\n");
+    _ = elf.load_and_spawn("/test_ring3.elf", "init", 1) catch |err| {
+        serial.log("ZigOS: Failed to spawn init: ");
+        serial.log(@errorName(err));
+        serial.log("\n");
     };
-    _ = elf.load_and_spawn("/apps/gui", "gui", 1) catch {
-        serial.log("ZigOS: Failed to spawn /apps/gui\n");
+    _ = elf.load_and_spawn("/apps/gui", "gui", 1) catch |err| {
+        serial.log("ZigOS: Failed to spawn /apps/gui: ");
+        serial.log(@errorName(err));
+        serial.log("\n");
     };
-    _ = elf.load_and_spawn("/apps/zterm", "zterm", 1) catch {
-        serial.log("ZigOS: Failed to spawn /apps/zterm\n");
+    _ = elf.load_and_spawn("/apps/zterm", "zterm", 1) catch |err| {
+        serial.log("ZigOS: Failed to spawn /apps/zterm: ");
+        serial.log(@errorName(err));
+        serial.log("\n");
     };
 
     apic.init();

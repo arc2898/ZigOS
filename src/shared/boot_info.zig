@@ -26,6 +26,22 @@ pub const MemoryMapInfo = extern struct {
     _pad: u32 = 0,
 };
 
+/// Framebuffer details exposed to userspace by sys_get_fb_info.
+pub const FramebufferInfo = extern struct {
+    base: u64,
+    width: u32,
+    height: u32,
+    pitch: u32,
+    format: PixelFormat = .rgb,
+    mask_red: u32 = 0,
+    mask_green: u32 = 0,
+    mask_blue: u32 = 0,
+    shift_red: u8 = 0,
+    shift_green: u8 = 0,
+    shift_blue: u8 = 0,
+    _pad: u8 = 0,
+};
+
 pub const BootInfo = extern struct {
     magic: u64,
     kernel_entry: u64,

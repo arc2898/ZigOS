@@ -1,6 +1,6 @@
 // Build-only root for diagnostic kernel.
 const std = @import("std");
-const boot_abi = @import("boot_abi.zig");
+const boot_abi = @import("boot_abi");
 
 pub const std_options: std.Options = .{
     .page_size_max = 4096,
@@ -26,7 +26,7 @@ export fn memset(dest: [*]u8, c: u8, n: usize) callconv(.{ .x86_64_sysv = .{} })
         : [dest] "{rdi}" (dest),
           [value] "{al}" (c),
           [count] "{rcx}" (n)
-        : .{ .memory = true }
+        : "memory"
     );
     return dest;
 }
@@ -38,7 +38,7 @@ export fn memcpy(dest: [*]u8, src: [*]const u8, n: usize) callconv(.{ .x86_64_sy
         : [dest] "{rdi}" (dest),
           [src] "{rsi}" (src),
           [count] "{rcx}" (n)
-        : .{ .memory = true }
+        : "memory"
     );
     return dest;
 }
@@ -55,7 +55,7 @@ export fn memmove(dest: [*]u8, src: [*]const u8, n: usize) callconv(.{ .x86_64_s
         : [dest] "{rdi}" (last_dest),
           [src] "{rsi}" (last_src),
           [count] "{rcx}" (n)
-        : .{ .memory = true }
+        : "memory"
     );
     return dest;
 }

@@ -1,7 +1,7 @@
 // A professional-grade 64-bit UEFI bootloader.
 const std = @import("std");
 const uefi = std.os.uefi;
-const boot_abi = @import("boot_abi.zig");
+const boot_abi = @import("boot_abi");
 
 const Handle = uefi.Handle;
 const SystemTable = uefi.tables.SystemTable;
@@ -81,18 +81,18 @@ const Phdr = extern struct {
     p_align: u64,
 };
 
-fn open_file_any(root: *File, paths: []const []const u8, file_out: **File) bool {
+fn open_file_any(root: *const File, paths: []const []const u8, file_out: **const File) bool {
     var name_buf: [256]u16 = undefined;
     for (paths) |p| {
-        if (root._open(root, file_out, utf16(&name_buf, p), File.OpenMode.read, File.Attributes{}) == .success) {
+        if (root._open(root, file_out, utf16(&name_buf, p), File.efi_file_mode_read, File.efi_file_read_only) == .success) {
             return true;
         }
     }
     return false;
 }
 
-fn load_elf(bs: *BootServices, root: *File, entry: *u64) bool {
-    var file: *File = undefined;
+fn load_elf(bs: *BootServices, root: *const File, entry: *u64) bool {
+    var file: *const File = undefined;
     const paths = [_][]const u8{ "\\zigos.elf", "zigos.elf", "\\EFI\\BOOT\\zigos.elf" };
     if (!open_file_any(root, &paths, &file)) return false;
     defer _ = file._close(file);
@@ -120,9 +120,9 @@ fn load_elf(bs: *BootServices, root: *File, entry: *u64) bool {
 
             const COM1 = 0x3F8;
             asm volatile ("outb %[v], %[p]" : : [v] "{al}" (@as(u8, 'A')), [p] "{dx}" (@as(u16, COM1)));
-            if (bs._allocatePages(.address, .loader_data, pages, @ptrCast(&addr)) != .success) {
+            if (bs.allocatePages(.allocate_address, .loader_data, pages, @ptrCast(&addr)) != .success) {
                 ser_print("FIXED ADDR FAILED, trying any... ");
-                if (bs._allocatePages(.any, .loader_data, pages, @ptrCast(&addr)) != .success) {
+                if (bs.allocatePages(.allocate_any_pages, .loader_data, pages, @ptrCast(&addr)) != .success) {
                     ser_print("FAILED\n");
                     return false;
                 }
@@ -151,8 +151,8 @@ fn load_elf(bs: *BootServices, root: *File, entry: *u64) bool {
     return true;
 }
 
-fn load_ramdisk(bs: *BootServices, root: *File) bool {
-    var file: *File = undefined;
+fn load_ramdisk(bs: *BootServices, root: *const File) bool {
+    var file: *const File = undefined;
     const paths = [_][]const u8{ "\\ramdisk.bin", "ramdisk.bin", "\\EFI\\BOOT\\ramdisk.bin" };
     if (!open_file_any(root, &paths, &file)) {
         ser_print("WARN: ramdisk.bin not found\n");
@@ -169,7 +169,7 @@ fn load_ramdisk(bs: *BootServices, root: *File) bool {
 
     const pages = (rd_size + 4095) / 4096;
     var addr: [*]align(4096) u8 = undefined;
-    if (bs._allocatePages(.any, .loader_data, @intCast(pages), @ptrCast(&addr)) != .success) return false;
+    if (bs.allocatePages(.allocate_any_pages, .loader_data, @intCast(pages), @ptrCast(&addr)) != .success) return false;
 
     var read_size: usize = @intCast(rd_size);
     if (file._read(file, &read_size, addr) != .success) return false;
@@ -180,16 +180,16 @@ fn load_ramdisk(bs: *BootServices, root: *File) bool {
     return true;
 }
 
-fn find_root_volume(image_handle: Handle, bs: *BootServices) ?*File {
+fn find_root_volume(image_handle: Handle, bs: *BootServices) ?*const File {
     // 1. Check LoadedImage device handle first
     var loaded_image: *LoadedImage = undefined;
-    if (bs._handleProtocol(image_handle, &LoadedImage.guid, @ptrCast(&loaded_image)) == .success) {
+    if (bs.handleProtocol(image_handle, &LoadedImage.guid, @ptrCast(&loaded_image)) == .success) {
         if (loaded_image.device_handle) |dev_handle| {
             var sfs: *SimpleFileSystem = undefined;
-            if (bs._handleProtocol(dev_handle, &SimpleFileSystem.guid, @ptrCast(&sfs)) == .success) {
-                var root: *File = undefined;
+            if (bs.handleProtocol(dev_handle, &SimpleFileSystem.guid, @ptrCast(&sfs)) == .success) {
+                var root: *const File = undefined;
                 if (sfs._open_volume(sfs, &root) == .success) {
-                    var test_file: *File = undefined;
+                    var test_file: *const File = undefined;
                     const paths = [_][]const u8{ "\\zigos.elf", "zigos.elf", "\\EFI\\BOOT\\zigos.elf" };
                     if (open_file_any(root, &paths, &test_file)) {
                         _ = test_file._close(test_file);
@@ -205,15 +205,15 @@ fn find_root_volume(image_handle: Handle, bs: *BootServices) ?*File {
     // 2. Scan all SimpleFileSystem handles on the system
     var handle_count: usize = 0;
     var handles: [*]Handle = undefined;
-    if (bs._locateHandleBuffer(.by_protocol, &SimpleFileSystem.guid, null, &handle_count, &handles) != .success) return null;
-    defer _ = bs._freePool(@ptrCast(handles));
+    if (bs.locateHandleBuffer(.by_protocol, &SimpleFileSystem.guid, null, &handle_count, &handles) != .success) return null;
+    defer _ = bs.freePool(@ptrCast(handles));
     var i: usize = 0;
     while (i < handle_count) : (i += 1) {
         var sfs: *SimpleFileSystem = undefined;
-        if (bs._handleProtocol(handles[i], &SimpleFileSystem.guid, @ptrCast(&sfs)) == .success) {
-            var root: *File = undefined;
+        if (bs.handleProtocol(handles[i], &SimpleFileSystem.guid, @ptrCast(&sfs)) == .success) {
+            var root: *const File = undefined;
             if (sfs._open_volume(sfs, &root) == .success) {
-                var test_file: *File = undefined;
+                var test_file: *const File = undefined;
                 const paths = [_][]const u8{ "\\zigos.elf", "zigos.elf", "\\EFI\\BOOT\\zigos.elf" };
                 if (open_file_any(root, &paths, &test_file)) {
                     _ = test_file._close(test_file);
@@ -231,20 +231,20 @@ pub export fn EfiMain(image_handle: Handle, system_table: *SystemTable) Status {
     const bs = system_table.boot_services.?;
     
     var addr: [*]align(4096) u8 = undefined;
-    if (bs._allocatePages(.any, .loader_data, 1, @ptrCast(&addr)) != .success) return .out_of_resources;
+    if (bs.allocatePages(.allocate_any_pages, .loader_data, 1, @ptrCast(&addr)) != .success) return .out_of_resources;
     boot_info_storage_ptr = @ptrCast(addr);
     @memset(addr[0..@sizeOf(boot_abi.BootInfo)], 0);
     const con_out = system_table.con_out.?;
 
-    _ = con_out.reset(false) catch {};
-    _ = con_out.setAttribute(@bitCast(@as(u8, 0x0F))) catch {};
-    _ = con_out.clearScreen() catch {};
+    _ = con_out.reset(false);
+    _ = con_out.setAttribute(@as(usize, 0x0F));
+    _ = con_out.clearScreen();
     
     var buf: [256]u16 = undefined;
-    _ = con_out.outputString(utf16(&buf, "****************************************\r\n")) catch {};
-    _ = con_out.outputString(utf16(&buf, "*      ZigOS Professional Edition      *\r\n")) catch {};
-    _ = con_out.outputString(utf16(&buf, "****************************************\r\n\r\n")) catch {};
-    _ = con_out.outputString(utf16(&buf, "Booting ZigOS...\r\n")) catch {};
+    _ = con_out.outputString(utf16(&buf, "****************************************\r\n"));
+    _ = con_out.outputString(utf16(&buf, "*      ZigOS Professional Edition      *\r\n"));
+    _ = con_out.outputString(utf16(&buf, "****************************************\r\n\r\n"));
+    _ = con_out.outputString(utf16(&buf, "Booting ZigOS...\r\n"));
     ser_print("ZigOS Bootloader: Initializing...\n");
 
     const root = find_root_volume(image_handle, bs) orelse {
@@ -262,10 +262,10 @@ pub export fn EfiMain(image_handle: Handle, system_table: *SystemTable) Status {
     _ = load_ramdisk(bs, root);
 
     var gop: *GraphicsOutput = undefined;
-    if (bs._locateProtocol(&GraphicsOutput.guid, null, @ptrCast(&gop)) == .success) {
+    if (bs.locateProtocol(&GraphicsOutput.guid, null, @ptrCast(&gop)) == .success) {
         // Find 1024x768 or 800x600 for maximum compatibility
         // Use mode 0 as a safe fallback if high resolution fails
-        _ = gop.setMode(0) catch {};
+        _ = gop.setMode(0);
         
         ser_print("GOP: mode set to ");
         var gbuf: [64]u8 = undefined;
@@ -279,8 +279,6 @@ pub export fn EfiMain(image_handle: Handle, system_table: *SystemTable) Status {
         while (j < fb_size) : (j += 1) {
             fb_ptr[j] = 0xFF000000; // Black
         }
-        fb_ptr[0] = 0xFFFFFFFF; // White dot at top-left for test
-        
         boot_info_storage_ptr.fb_base = gop.mode.frame_buffer_base;
         boot_info_storage_ptr.fb_width = gop.mode.info.horizontal_resolution;
         boot_info_storage_ptr.fb_height = gop.mode.info.vertical_resolution;
@@ -315,18 +313,32 @@ pub export fn EfiMain(image_handle: Handle, system_table: *SystemTable) Status {
     boot_info_storage_ptr.kernel_entry = kernel_entry;
 
     var map_size: usize = 0;
-    var map_key: uefi.tables.MemoryMapKey = @enumFromInt(0);
+    var map_key: usize = 0;
     var desc_size: usize = 0;
     var desc_ver: u32 = 0;
-    _ = bs._getMemoryMap(&map_size, null, &map_key, &desc_size, &desc_ver);
+    _ = bs.getMemoryMap(&map_size, null, &map_key, &desc_size, &desc_ver);
     map_size += 8192;
     
     var map_buf: [*]align(4096) u8 = undefined;
-    if (bs._allocatePages(.any, .loader_data, (map_size + 4095) / 4096, @ptrCast(&map_buf)) != .success) return .out_of_resources;
+    if (bs.allocatePages(.allocate_any_pages, .loader_data, (map_size + 4095) / 4096, @ptrCast(&map_buf)) != .success) return .out_of_resources;
     
-    if (bs._getMemoryMap(&map_size, @ptrCast(map_buf), &map_key, &desc_size, &desc_ver) != .success) {
+    if (bs.getMemoryMap(&map_size, @ptrCast(map_buf), &map_key, &desc_size, &desc_ver) != .success) {
         ser_print("ERR: Failed to get memory map\n");
         return .load_error;
+    }
+
+    ser_print("Exiting boot services...\n");
+    var status = bs.exitBootServices(image_handle, map_key);
+    if (status != .success) {
+        if (bs.getMemoryMap(&map_size, @ptrCast(map_buf), &map_key, &desc_size, &desc_ver) != .success) {
+            ser_print("ERR: Failed to refresh memory map\n");
+            return .load_error;
+        }
+        status = bs.exitBootServices(image_handle, map_key);
+        if (status != .success) {
+            ser_print("ERR: Failed to exit boot services\n");
+            return .load_error;
+        }
     }
 
     boot_info_storage_ptr.memmap = .{
@@ -335,17 +347,6 @@ pub export fn EfiMain(image_handle: Handle, system_table: *SystemTable) Status {
         .desc_size = desc_size,
         .desc_version = desc_ver,
     };
-
-    ser_print("Exiting boot services...\n");
-    var status = bs._exitBootServices(image_handle, map_key);
-    if (status != .success) {
-        _ = bs._getMemoryMap(&map_size, @ptrCast(map_buf), &map_key, &desc_size, &desc_ver);
-        status = bs._exitBootServices(image_handle, map_key);
-        if (status != .success) {
-            ser_print("ERR: Failed to exit boot services\n");
-            return .load_error;
-        }
-    }
 
     ser_print("JUMPING TO KERNEL\n");
     const kernel_fn: *const fn (*boot_abi.BootInfo) callconv(.{ .x86_64_sysv = .{} }) noreturn = @ptrFromInt(kernel_entry);

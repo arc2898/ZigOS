@@ -99,7 +99,7 @@ pub fn load_pair(prev_head: usize, prev_tail: usize) struct { head: usize, tail:
         : [hv] "={rax}" (hv), [tv] "={rcx}" (tv)
         : [hp] "{rdx}" (&head), [hp_prev] "{r8}" (prev_head),
           [tp] "{rsi}" (&tail), [tp_prev] "{r9}" (prev_tail)
-        : .{ .memory = true });
+        : "memory");
     return .{ .head = hv - prev_head, .tail = tv - prev_tail };
 }
 
@@ -110,7 +110,7 @@ fn store_head(v: usize) usize {
     asm volatile ("# SHP\n\tmovq %[v], (%[hp]); movq (%[hp]), %[b]"
         : [b] "={rax}" (back)
         : [v] "{rcx}" (v), [hp] "{rdx}" (&head)
-        : .{ .memory = true });
+        : "memory");
     return back;
 }
 
@@ -119,7 +119,7 @@ fn store_tail(v: usize) usize {
     asm volatile ("# STP\n\tmovq %[v], (%[tp]); movq (%[tp]), %[b]"
         : [b] "={rax}" (back)
         : [v] "{rcx}" (v), [tp] "{r8}" (&tail)
-        : .{ .memory = true });
+        : "memory");
     return back;
 }
 
@@ -151,7 +151,7 @@ fn load_byte(idx: usize) u8 {
     asm volatile ("# LBY\n\tmovb (%[bp],%[i]), %[v]"
         : [v] "={al}" (v)
         : [bp] "{rdx}" (@as(*u8, @ptrCast(&buf))), [i] "{rcx}" (idx)
-        : .{ .memory = true });
+        : "memory");
     return v;
 }
 

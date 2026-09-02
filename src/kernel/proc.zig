@@ -263,7 +263,7 @@ pub fn destroy_process(pid: u32) bool {
             // Destroy the entire user address space (frees all user pages + page tables)
             vmm.destroy_address_space(p.pml4_phys);
             
-            _ = sched.kill_task(p.task_id);
+            _ = sched.reap_task(p.task_id);
             free_pid(p.pid);
             clear_proc(p);
             proc_count -= 1;

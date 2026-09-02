@@ -105,9 +105,9 @@ pub const FsOps = struct {
     fn read(self: FsOps, inode: usize, offset: usize, buf: []u8) VfsError!usize {
         return @as(*const fn (usize, usize, []u8) VfsError!usize, @ptrFromInt(self.read_ptr))(inode, offset, buf);
     }
-    fn write(self: FsOps, inode: usize, data: []const u8) VfsError!usize {
+    fn write(self: FsOps, inode: usize, offset: usize, data: []const u8) VfsError!usize {
         if (self.write_ptr == 0) return VfsError.Unsupported;
-        return @as(*const fn (usize, []const u8) VfsError!usize, @ptrFromInt(self.write_ptr))(inode, data);
+        return @as(*const fn (usize, usize, []const u8) VfsError!usize, @ptrFromInt(self.write_ptr))(inode, offset, data);
     }
     fn create_file(self: FsOps, path: []const u8) VfsError!usize {
         if (self.create_file_ptr == 0) return VfsError.Unsupported;
@@ -177,8 +177,8 @@ fn ftfs_read(inode: usize, offset: usize, buf: []u8) VfsError!usize {
     return n;
 }
 
-fn ftfs_write(inode: usize, data: []const u8) VfsError!usize {
-    const written = ftfs.write_file_at(inode, 0, data);
+fn ftfs_write(inode: usize, offset: usize, data: []const u8) VfsError!usize {
+    const written = ftfs.write_file_at(inode, offset, data);
     if (written == 0) return VfsError.NoSpace;
     return written;
 }
@@ -328,9 +328,13 @@ pub fn read_file_at(inode: usize, offset: usize, buf: []u8) VfsError!usize {
     return ops.read(inode, offset, buf);
 }
 
-pub fn write_file(inode: usize, data: []const u8) VfsError!usize {
+pub fn write_file_at(inode: usize, offset: usize, data: []const u8) VfsError!usize {
     const ops = root_ops() orelse return VfsError.NotFound;
-    return ops.write(inode, data);
+    return ops.write(inode, offset, data);
+}
+
+pub fn write_file(inode: usize, data: []const u8) VfsError!usize {
+    return write_file_at(inode, 0, data);
 }
 
 pub fn create_file(path: []const u8) VfsError!usize {

@@ -1,6 +1,6 @@
 // Robust Physical Memory Manager for ZigOS.
 const std = @import("std");
-const boot_abi = @import("../boot_abi.zig");
+const boot_abi = @import("boot_abi");
 const serial = @import("../driver/serial.zig");
 
 pub const PAGE_SIZE: usize = 4096;
@@ -40,7 +40,9 @@ pub fn init(info: *const boot_abi.BootInfo) void {
     while (i < desc_count) : (i += 1) {
         const desc = @as(*const boot_abi.MemoryDescriptor, @ptrFromInt(info.memmap.addr + i * desc_size));
         // Type 7 is EfiConventionalMemory
-        if (desc.type == 7 and desc.page_count >= bitmap_frames and desc.phys_start >= 0x100000) {
+        const desc_end = desc.phys_start + desc.page_count * PAGE_SIZE;
+        if (desc.type == 7 and desc.page_count >= bitmap_frames and
+            desc.phys_start >= 0x100000 and desc_end <= 0x100000000) {
             bitmap_phys = desc.phys_start;
             break;
         }

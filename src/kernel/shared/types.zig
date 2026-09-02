@@ -1,74 +1,21 @@
 // Shared type definitions for the kernel and all modules. Both sides import
 // this exact file so message structs, limits, and error codes stay in sync.
 
-/// Pixel formats reported by the bootloader's GOP probe.
-pub const PixelFormat = enum(u32) {
-    rgb = 0,
-    bgr = 1,
-    bitmask = 2,
-    _,
-};
+const boot_info = @import("boot_abi");
 
-pub const FramebufferInfo = extern struct {
-    base: u64,
-    width: u32,
-    height: u32,
-    pitch: u32,
-    format: PixelFormat,
-    mask_red: u32 = 0,
-    mask_green: u32 = 0,
-    mask_blue: u32 = 0,
-    shift_red: u8 = 0,
-    shift_green: u8 = 0,
-    shift_blue: u8 = 0,
-};
+/// Boot and framebuffer ABI are defined once beside the handoff structure.
+pub const PixelFormat = boot_info.PixelFormat;
+pub const FramebufferInfo = boot_info.FramebufferInfo;
 
 /// One entry in the UEFI memory map, normalised to 4K pages.
-pub const MemoryDescriptor = extern struct {
-    type: u32,
-    phys_start: u64,
-    virt_start: u64,
-    page_count: u64,
-    attribute: u64,
-};
+pub const MemoryDescriptor = boot_info.MemoryDescriptor;
 
 /// Handoff structure built by the bootloader.
-pub const BOOT_INFO_MAGIC: u64 = 0x5a69674f73424f4f;
+pub const BOOT_INFO_MAGIC: u64 = boot_info.BOOT_INFO_MAGIC;
 
 /// Memory map summary handed off from the bootloader.
-pub const MemoryMapInfo = extern struct {
-    addr: u64,
-    size: u64,
-    desc_size: u64,
-    desc_version: u32,
-    _pad: u32 = 0,
-};
-
-pub const BootInfo = extern struct {
-    magic: u64,
-    kernel_entry: u64,
-    rsdp: u64,
-    memmap: MemoryMapInfo,
-    ramdisk_addr: u64,
-    ramdisk_size: u64,
-    fb_base: u64,
-    fb_width: u64,
-    fb_height: u64,
-    fb_pitch: u64,
-    fb_format: PixelFormat,
-    fb_mask_red: u32 = 0,
-    fb_mask_green: u32 = 0,
-    fb_mask_blue: u32 = 0,
-    fb_shift_red: u8 = 0,
-    fb_shift_green: u8 = 0,
-    fb_shift_blue: u8 = 0,
-    _pad3: u8 = 0,
-    _pad4: u32 = 0,
-    kernel_phys_start: u64,
-    kernel_phys_end: u64,
-    bootloader_phys_start: u64,
-    bootloader_phys_end: u64,
-};
+pub const MemoryMapInfo = boot_info.MemoryMapInfo;
+pub const BootInfo = boot_info.BootInfo;
 
 /// Message passing limits. Keep payloads small and fixed size; larger data
 /// moves through shared buffers referenced by handle.

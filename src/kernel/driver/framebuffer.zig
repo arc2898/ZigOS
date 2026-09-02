@@ -32,7 +32,11 @@ pub fn init(info: types.FramebufferInfo) void {
     // Update text grid dimensions based on resolution
     WIDTH = info.width / 8;
     HEIGHT = info.height / 16;
-    
+    if (WIDTH == 0 or HEIGHT == 0 or info.pitch < info.width * 4) {
+        enabled = false;
+        return;
+    }
+
     clear();
 }
 
@@ -50,11 +54,19 @@ fn color_to_native(rgb: u32) u32 {
         .rgb => (b << 16) | (g << 8) | r,
         .bgr => (r << 16) | (g << 8) | b,
         .bitmask => blk: {
-            // Handle complex bitmasks if provided
-            const r_val = (r >> @truncate(8 - @popCount(fb_info.mask_red))) << @truncate(fb_info.shift_red);
-            const g_val = (g >> @truncate(8 - @popCount(fb_info.mask_green))) << @truncate(fb_info.shift_green);
-            const b_val = (b >> @truncate(8 - @popCount(fb_info.mask_blue))) << @truncate(fb_info.shift_blue);
-            break :blk r_val | g_val | b_val;
+            // Scale each channel into the supplied mask. Empty masks are
+            // valid for some firmware paths and must not cause underflow.
+            const pack = struct {
+                fn channel(value: u32, mask: u32, shift: u8) u32 {
+                    const bits = @popCount(mask);
+                    if (bits == 0) return 0;
+                    const max_value = (@as(u32, 1) << @intCast(bits)) - 1;
+                    return (((value * max_value + 127) / 255) << @intCast(shift)) & mask;
+                }
+            };
+            break :blk pack.channel(r, fb_info.mask_red, fb_info.shift_red) |
+                pack.channel(g, fb_info.mask_green, fb_info.shift_green) |
+                pack.channel(b, fb_info.mask_blue, fb_info.shift_blue);
         },
         else => (r << 16) | (g << 8) | b,
     };
@@ -116,7 +128,7 @@ pub fn erase_cell(col: usize, row: usize, attr: u8) void {
 }
 
 pub fn scroll(attr: u8) void {
-    if (!enabled) return;
+    if (!enabled or HEIGHT < 2) return;
     const pitch_pixels = fb_info.pitch / 4;
     _ = 16 * pitch_pixels;
     
@@ -156,7 +168,7 @@ pub fn get_info() types.FramebufferInfo {
     return fb_info;
 }
 
-// Minimal 8x16 font data (placeholder for actual font array)
+// Built-in 8x16 fallback font data used when no external font is loaded.
 const FONT = @import("font_data.zig").FONT_DATA;
 
 pub fn is_enabled() bool { return enabled; }

@@ -1,6 +1,6 @@
 // Screen facade for ZigOS.
 const std = @import("std");
-const boot_abi = @import("../boot_abi.zig");
+const boot_abi = @import("boot_abi");
 const font = @import("font_data.zig");
 const pmem = @import("../mm/physical.zig");
 

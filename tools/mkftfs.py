@@ -2,6 +2,7 @@ import os
 import struct
 import sys
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BLOCK = 4096
 MAGIC = struct.unpack("<Q", b"FTFS\0\0\0\0")[0]
 VERSION = 2
@@ -16,9 +17,9 @@ def pack_ftfs(output_path, asset_paths):
     files["/version"] = b"0.1.0\n"
     files["/motd"] = b"Welcome to ZigOS!\n"
     
-    if not asset_paths and os.path.exists("assets"):
+    if not asset_paths and os.path.exists(os.path.join(PROJECT_ROOT, "assets")):
         import glob
-        asset_paths = glob.glob("assets/*.raw")
+        asset_paths = glob.glob(os.path.join(PROJECT_ROOT, "assets", "*.raw"))
 
     for f in asset_paths:
         name = "/" + os.path.basename(f)
@@ -26,7 +27,7 @@ def pack_ftfs(output_path, asset_paths):
             files[name] = fh.read()
             print(f"FTFS: including asset {name} ({len(files[name])} bytes)")
 
-    test_bin = os.path.join("userspace", "test_ring3.elf")
+    test_bin = os.path.join(PROJECT_ROOT, "userspace", "test_ring3.elf")
     if os.path.exists(test_bin):
         with open(test_bin, "rb") as f:
             files["/test_ring3.elf"] = f.read()
@@ -35,7 +36,7 @@ def pack_ftfs(output_path, asset_paths):
     # Add apps
     app_bins = ["gui.bin", "desktop.bin", "dm.bin", "fm.bin", "test_gui.bin", "notepad.bin", "zterm.bin", "sysmon.bin", "ide.bin", "props.bin", "zbrowser.bin", "pkgmgr.bin", "imgview.bin", "play.bin", "zide.bin"]
     for ab in app_bins:
-        app_path = os.path.join("sample", ab)
+        app_path = os.path.join(PROJECT_ROOT, "sample", ab)
         if os.path.exists(app_path):
             with open(app_path, "rb") as f:
                 files["/apps/" + ab.replace(".bin", "")] = f.read()

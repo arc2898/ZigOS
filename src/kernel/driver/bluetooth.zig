@@ -1,11 +1,9 @@
-// Bluetooth driver placeholder for ZigOS.
-// Handles discovery of Bluetooth controllers via PCI/USB.
+// Bluetooth controller discovery hook for ZigOS.
+// Full transport support is disabled until USB/HCI ownership is available.
 
-const std = @import("std");
-const pci = @import("pci.zig");
 const serial = @import("serial.zig");
 
 pub fn init() void {
-    // Bluetooth controllers often appear as USB devices or specific PCI classes.
-    serial.log("Bluetooth: scanning for controllers...\n");
+    // Report the real capability state instead of claiming that discovery ran.
+    serial.log("Bluetooth: controller transport unavailable\n");
 }

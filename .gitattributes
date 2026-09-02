@@ -1,0 +1,11 @@
+tools/dev/homeiso.iso filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/f01290e2e0ebb3d63ca20a37a424eb3b/zigos.iso filter=lfs diff=lfs merge=lfs -text
+zig-out/zigos.iso filter=lfs diff=lfs merge=lfs -text
+zigos.img filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/01080a24cea68e5e0992086c796b959c/zigos.iso filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/1c47c29fa57446ec5dd9b82473a7bdb6/zigos.iso filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/31f069e6d9763a259566faa89d3e7faf/zigos.iso filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/34ac6f9f8f167a70be42cab91e520a98/zigos.iso filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/7284d3f2fb1fa797b8f92f2aede46c02/zigos.iso filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/79604132a4d556080fee8f1abbec4712/zigos.iso filter=lfs diff=lfs merge=lfs -text
+.zig-cache/o/99c0e1309a8257f466dc2b82a2d6bc0b/zigos.iso filter=lfs diff=lfs merge=lfs -text

@@ -604,15 +604,16 @@ def create_uefi_iso(output_iso_path, efiboot_img_bytes, boot_efi_bytes, kernel_b
     iso[boot_dir_sector * sector_size : (boot_dir_sector + 1) * sector_size] = bootdir
 
     # 8. El Torito Boot Catalog (Sector 24)
+    # The validation entry must have its checksum at offset 0x1C and the
+    # 0x55AA key at offset 0x1E.  A misplaced key/checksum makes firmware
+    # reject the catalog even though the ISO filesystem remains readable.
     cat = bytearray(sector_size)
-    cat[0] = 0x01
-    cat[1] = 0x00
-    cat[0x1C] = 0x55
-    cat[0x1D] = 0xAA
-    csum = 0
-    for i in range(16):
-        csum += struct.unpack_from("<H", cat, i * 2)[0]
-    struct.pack_into("<H", cat, 0x1E, (0x10000 - (csum & 0xFFFF)) & 0xFFFF)
+    cat[0x00] = 0x01  # Validation header ID
+    cat[0x01] = 0x00  # x86 platform ID
+    cat[0x04:0x04 + 20] = b"ZigOS UEFI Boot Catalog"
+    cat[0x1E:0x20] = b"\x55\xAA"
+    csum = sum(struct.unpack_from("<H", cat, i * 2)[0] for i in range(16))
+    struct.pack_into("<H", cat, 0x1C, (-csum) & 0xFFFF)
 
     # Initial / Default Entry (points to efiboot.img)
     cat[0x20] = 0x88 # Bootable

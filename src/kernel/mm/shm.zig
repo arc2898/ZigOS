@@ -60,7 +60,7 @@ pub fn map(id: i64, pml4: usize, virt_hint: usize) usize {
     
     var p: usize = 0;
     while (p < r.size_pages) : (p += 1) {
-        if (!vmm.map_page(pml4, virt + p * pmem.PAGE_SIZE, r.phys_addr + p * pmem.PAGE_SIZE, vmm.PAGE_PRESENT | vmm.PAGE_WRITE | vmm.PAGE_USER)) {
+        if (!vmm.map_page(pml4, virt + p * pmem.PAGE_SIZE, r.phys_addr + p * pmem.PAGE_SIZE, vmm.PAGE_PRESENT | vmm.PAGE_WRITE | vmm.PAGE_USER | vmm.PAGE_NX)) {
             return 0;
         }
     }

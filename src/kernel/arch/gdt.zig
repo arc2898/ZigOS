@@ -80,7 +80,7 @@ pub fn init(ist1: u64, rsp0: u64, iopb: u16) void {
         \\ movw %%ax, %%ss
         :
         : [gdtr] "r" (&gdtr)
-        : .{ .memory = true }
+        : "memory"
     );
 }
 

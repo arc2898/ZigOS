@@ -2,7 +2,11 @@
 set -e
 cd "$(dirname "$0")/.."
 
-ZIG="${ZIG:-/opt/zig14/zig}"
+ZIG="${ZIG:-$(command -v zig 2>/dev/null || true)}"
+if [ -z "$ZIG" ] || [ ! -x "$ZIG" ]; then
+  echo "Zig compiler not found; set ZIG to a Zig 0.14+ executable." >&2
+  exit 127
+fi
 BUILD_DIR="sample"
 ASSETS_DIR="assets"
 
@@ -16,6 +20,7 @@ $ZIG c++ -target x86_64-freestanding-none -ffreestanding -nostdlib -fno-exceptio
 
 echo "== embedding desktop assets =="
 python3 tools/extract_font.py
+python3 tools/generate_fallback_assets.py
 $ZIG cc -target x86_64-freestanding-none -c userspace/desktop_assets.S -o $BUILD_DIR/desktop_assets.o
 
 echo "== linking C++ Desktop =="

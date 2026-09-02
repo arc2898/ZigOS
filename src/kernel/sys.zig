@@ -2,6 +2,7 @@ const std = @import("std");
 const gdt = @import("arch/gdt.zig");
 const serial = @import("driver/serial.zig");
 const idt = @import("arch/idt.zig");
+const boot_abi = @import("boot_abi");
 
 pub const PerCpu = extern struct {
     kstack_top: u64, // offset 0
@@ -18,7 +19,7 @@ fn wrmsr(msr: u32, val: u64) void {
         : [msr] "{ecx}" (msr),
           [lo] "{eax}" (lo),
           [hi] "{edx}" (hi),
-        : .{ .memory = true }
+        : "memory"
     );
 }
 
@@ -29,7 +30,7 @@ fn rdmsr(msr: u32) u64 {
         : [lo] "={eax}" (lo),
           [hi] "={edx}" (hi),
         : [msr] "{ecx}" (msr),
-        : .{ .memory = true }
+        : "memory"
     );
     return (@as(u64, hi) << 32) | lo;
 }
@@ -142,6 +143,9 @@ fn sys_waitpid(frame: *idt.Registers) u64 {
     if (child.state != .zombie) return 0xFFFFFFFFFFFFFFF5;
 
     const exit_code = child.exit_code;
+    if (status_ptr != 0 and !validate_user_ptr(status_ptr, @sizeOf(u64))) {
+        return 0xFFFFFFFFFFFFFFFF;
+    }
     if (status_ptr != 0) {
         const ptr = @as(*u64, @ptrFromInt(status_ptr));
         ptr.* = exit_code;
@@ -166,9 +170,11 @@ fn sys_yield(frame: *idt.Registers) u64 {
 }
 
 fn sys_exec(frame: *idt.Registers) u64 {
+    if (!validate_user_ptr(frame.rdi, 256)) return 0xFFFFFFFFFFFFFFFF;
     const path_ptr = @as([*]const u8, @ptrFromInt(frame.rdi));
     var path_len: usize = 0;
-    while (path_ptr[path_len] != 0) : (path_len += 1) {}
+    while (path_len < 256 and path_ptr[path_len] != 0) : (path_len += 1) {}
+    if (path_len == 256) return 0xFFFFFFFFFFFFFFFF;
     const path = path_ptr[0..path_len];
 
     const proc = @import("proc.zig");
@@ -197,8 +203,15 @@ fn sys_exec(frame: *idt.Registers) u64 {
     // 4. Create new user stack
     const stack_top = 0x00007FFFFFFFE000;
     const stack_phys = pmem.alloc_frame();
-    if (stack_phys == 0) return 0xFFFFFFFFFFFFFFFF;
-    if (!vmm.map_page(new_pml4, stack_top - pmem.PAGE_SIZE, stack_phys, vmm.PAGE_PRESENT | vmm.PAGE_WRITE | vmm.PAGE_USER)) return 0xFFFFFFFFFFFFFFFF;
+    if (stack_phys == 0) {
+        vmm.destroy_address_space(new_pml4);
+        return 0xFFFFFFFFFFFFFFFF;
+    }
+    if (!vmm.map_page(new_pml4, stack_top - pmem.PAGE_SIZE, stack_phys, vmm.PAGE_PRESENT | vmm.PAGE_WRITE | vmm.PAGE_USER | vmm.PAGE_NX)) {
+        pmem.free_frame(stack_phys);
+        vmm.destroy_address_space(new_pml4);
+        return 0xFFFFFFFFFFFFFFFF;
+    }
 
     // 5. Update process and task
     const old_pml4 = p.pml4_phys;
@@ -222,6 +235,9 @@ fn sys_exec(frame: *idt.Registers) u64 {
 }
 
 fn sys_register_port(frame: *idt.Registers) u64 {
+    if (!validate_user_ptr(frame.rdi, @import("shared/types.zig").MAX_PORT_NAME)) {
+        return 0xFFFFFFFFFFFFFFFF;
+    }
     const name_ptr = @as([*]const u8, @ptrFromInt(frame.rdi));
     const ipc = @import("ipc.zig");
     const sched = @import("sched.zig");
@@ -240,6 +256,10 @@ fn sys_register_port(frame: *idt.Registers) u64 {
 }
 
 fn sys_ipc_send(frame: *idt.Registers) u64 {
+    if (!validate_user_ptr(frame.rdi, @import("shared/types.zig").MAX_PORT_NAME) or
+        !validate_user_ptr(frame.rsi, @sizeOf(@import("shared/types.zig").Message))) {
+        return 0xFFFFFFFFFFFFFFFF;
+    }
     const name_ptr = @as([*]const u8, @ptrFromInt(frame.rdi));
     const msg_ptr = @as(*const @import("shared/types.zig").Message, @ptrFromInt(frame.rsi));
     const ipc = @import("ipc.zig");
@@ -258,6 +278,10 @@ fn sys_ipc_send(frame: *idt.Registers) u64 {
 }
 
 fn sys_ipc_recv(frame: *idt.Registers) u64 {
+    if (!validate_user_ptr(frame.rdi, @import("shared/types.zig").MAX_PORT_NAME) or
+        !validate_user_ptr(frame.rsi, @sizeOf(@import("shared/types.zig").Message))) {
+        return 0xFFFFFFFFFFFFFFFF;
+    }
     const name_ptr = @as([*]const u8, @ptrFromInt(frame.rdi));
     const msg_ptr = @as(*@import("shared/types.zig").Message, @ptrFromInt(frame.rsi));
     const is_async = frame.rdx != 0;
@@ -290,7 +314,10 @@ fn sys_shm_map(frame: *idt.Registers) u64 {
 }
 
 fn sys_get_fb_info(frame: *idt.Registers) u64 {
-    const info_ptr = @as(*@import("shared/types.zig").FramebufferInfo, @ptrFromInt(frame.rdi));
+    if (!validate_user_ptr(frame.rdi, @sizeOf(boot_abi.FramebufferInfo))) {
+        return 0xFFFFFFFFFFFFFFFF;
+    }
+    const info_ptr = @as(*boot_abi.FramebufferInfo, @ptrFromInt(frame.rdi));
     const main = @import("main.zig");
     const boot_info = main.get_boot_info();
     
@@ -322,9 +349,11 @@ fn sys_reboot(frame: *idt.Registers) u64 {
 }
 
 fn sys_spawn(frame: *idt.Registers) u64 {
+    if (!validate_user_ptr(frame.rdi, 256)) return 0xFFFFFFFFFFFFFFFF;
     const path_ptr = @as([*]const u8, @ptrFromInt(frame.rdi));
     var path_len: usize = 0;
-    while (path_ptr[path_len] != 0) : (path_len += 1) {}
+    while (path_len < 256 and path_ptr[path_len] != 0) : (path_len += 1) {}
+    if (path_len == 256) return 0xFFFFFFFFFFFFFFFF;
     const path = path_ptr[0..path_len];
     
     const elf = @import("elf.zig");
@@ -388,11 +417,12 @@ fn sys_open(frame: *idt.Registers) u64 {
     const p = proc.get_current_process() orelse return 0xFFFFFFFFFFFFFFFF;
 
     const path_ptr_val = frame.rdi;
-    if (!validate_user_ptr(path_ptr_val, 1)) return 0xFFFFFFFFFFFFFFFF;
+    if (!validate_user_ptr(path_ptr_val, 256)) return 0xFFFFFFFFFFFFFFFF;
 
     const path_ptr = @as([*]const u8, @ptrFromInt(path_ptr_val));
     var path_len: usize = 0;
     while (path_len < 256 and path_ptr[path_len] != 0) : (path_len += 1) {}
+    if (path_len == 256) return 0xFFFFFFFFFFFFFFFF;
     const path = path_ptr[0..path_len];
 
     const inode = vfs.resolve(path) catch return 0xFFFFFFFFFFFFFFFF;
@@ -449,7 +479,7 @@ fn sys_write(frame: *idt.Registers) u64 {
     const file = p.fd_table[fd] orelse return 0xFFFFFFFFFFFFFFFF;
 
     const data = @as([*]const u8, @ptrFromInt(buf_ptr))[0..len];
-    const n = vfs.write_file(file.inode, data) catch return 0xFFFFFFFFFFFFFFFF;
+    const n = vfs.write_file_at(file.inode, file.offset, data) catch return 0xFFFFFFFFFFFFFFFF;
     file.offset += n;
     return n;
 }

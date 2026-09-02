@@ -49,4 +49,3 @@ xorriso -as mkisofs \
 
 echo "ISO build complete: $OUTPUT"
 cat "$STAGING/manifest.txt"
-# This was still in under devlopment need to do more work before turnning this in to full operating system

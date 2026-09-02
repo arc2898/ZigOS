@@ -3,7 +3,11 @@ set -e
 cd "$(dirname "$0")"
 
 # 1. Compile zide.zig to ELF
-ZIG="${ZIG:-/opt/zig14/zig}"
+ZIG="${ZIG:-$(command -v zig 2>/dev/null || true)}"
+if [ -z "$ZIG" ] || [ ! -x "$ZIG" ]; then
+  echo "Zig compiler not found; set ZIG to a Zig 0.14+ executable." >&2
+  exit 127
+fi
 $ZIG build-exe ../userspace/zide.zig \
     -target x86_64-freestanding \
     -T ../userspace/user.ld \

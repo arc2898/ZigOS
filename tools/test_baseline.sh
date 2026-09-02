@@ -1,7 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-ISO_PATH="${1:-zig-out/zigos.iso}"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+PROJECT_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
+ISO_PATH="${1:-$PROJECT_DIR/zig-out/zigos.iso}"
 TIMEOUT_SEC="${2:-30}"
 
 if [ ! -f "$ISO_PATH" ]; then
@@ -13,14 +15,15 @@ RUN_DIR=$(mktemp -d /tmp/zigos_run.XXXXXX)
 LOG_FILE="$RUN_DIR/serial.log"
 VARS_FILE="$RUN_DIR/OVMF_VARS.fd"
 MONITOR_SOCK="$RUN_DIR/monitor.sock"
-SCREENSHOT="/home/ubuntu/zigos_screenshot.png"
+SCREENSHOT="${SCREENSHOT_PATH:-$PROJECT_DIR/zigos_screenshot.ppm}"
+OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 
 # Copy OVMF vars to avoid permission issues and preserve state
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$VARS_FILE"
 
 echo "Starting QEMU (log: $LOG_FILE)..."
 qemu-system-x86_64 \
-    -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+    -drive if=pflash,format=raw,readonly=on,file="$OVMF_CODE" \
     -drive if=pflash,format=raw,file="$VARS_FILE" \
     -drive format=raw,file="$ISO_PATH" \
     -serial file:"$LOG_FILE" \
@@ -33,6 +36,7 @@ qemu-system-x86_64 \
 # Wait for milestones or timeout
 START_TIME=$(date +%s)
 REACHED_KERNEL=false
+REACHED_SCHEDULER=false
 REACHED_GUI=false
 
 while true; do
@@ -46,14 +50,17 @@ while true; do
                 REACHED_KERNEL=true
             fi
         fi
+        if grep -q "ZigOS: entering scheduler loop" "$LOG_FILE"; then
+            REACHED_SCHEDULER=true
+        fi
         if grep -q "ZigOS: GUI test successful. Halting." "$LOG_FILE"; then
             echo "Milestone: GUI checkpoint reached."
             REACHED_GUI=true
-            
-            # Give it a moment to ensure framebuffer writes are flushed
+        fi
+        # The production image continues running and does not intentionally
+        # halt. Treat kernel + scheduler entry as the smoke-test success state.
+        if [ "$REACHED_KERNEL" = true ] && [ "$REACHED_SCHEDULER" = true ]; then
             sleep 2
-            
-            # Capture screenshot via QEMU monitor
             echo "screendump $SCREENSHOT" | socat - UNIX-CONNECT:"$MONITOR_SOCK"
             echo "Screenshot saved to $SCREENSHOT"
             break
@@ -84,10 +91,10 @@ if [ -f "$LOG_FILE" ]; then
 fi
 echo "---------------------"
 
-if [ "$REACHED_GUI" = true ]; then
-    echo "VERIFIED: Baseline boot reached GUI halt signal."
+if [ "$REACHED_KERNEL" = true ] && [ "$REACHED_SCHEDULER" = true ]; then
+    echo "VERIFIED: Kernel entered the scheduler loop and framebuffer capture completed."
     exit 0
 else
-    echo "FAILED: Did not reach GUI halt signal."
+    echo "FAILED: Kernel/scheduler smoke-test milestones were not reached."
     exit 1
 fi

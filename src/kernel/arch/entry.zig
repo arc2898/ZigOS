@@ -1,9 +1,9 @@
-const boot_abi = @import("../boot_abi.zig");
+const boot_abi = @import("boot_abi");
 const main = @import("../main.zig");
 
 pub export var boot_stack: [16384]u8 align(16) = undefined;
 
-pub export fn _start(_: *const boot_abi.BootInfo) callconv(.{ .x86_64_sysv = .{} }) noreturn {
+pub export fn _start(info: *const boot_abi.BootInfo) callconv(.{ .x86_64_sysv = .{} }) noreturn {
     asm volatile (
         \\movw $0x3f8, %%dx
         \\movb $'K', %%al
@@ -12,11 +12,15 @@ pub export fn _start(_: *const boot_abi.BootInfo) callconv(.{ .x86_64_sysv = .{}
         \\lea boot_stack(%%rip), %%rax
         \\add $16384, %%rax
         \\mov %%rax, %%rsp
+        \\mov %[info], %%rdi
         \\movb $'S', %%al
         \\outb %%al, %%dx
         \\movb $'C', %%al
         \\outb %%al, %%dx
         \\call kernel_main
+        :
+        : [info] "r" (info)
+        : "memory"
     );
     while (true) {}
 }

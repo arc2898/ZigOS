@@ -225,12 +225,19 @@ pub fn sys_connect(fd: u64, ip_u32: u32, port: u16) u64 {
     s.seq_num += 1; // SYN consumes a sequence number
 
     // Wait for SYN-ACK (poll network)
+    // int 0x80 is an interrupt gate, so IF is cleared on entry. Keep timer
+    // interrupts enabled while polling or a connect would stop scheduling.
+    asm volatile ("sti");
     var timeout: u32 = 0;
     while (timeout < 500000) : (timeout += 1) {
         update();
-        if (s.state == .established) return 0;
+        if (s.state == .established) {
+            asm volatile ("cli");
+            return 0;
+        }
         asm volatile ("pause");
     }
+    asm volatile ("cli");
 
     serial.log("net: TCP connect timeout\n");
     s.state = .closed;
@@ -254,7 +261,7 @@ pub fn sys_send(fd: u64, buf_ptr: u64, len: u64) u64 {
     while (sent < data.len) {
         const chunk = @min(data.len - sent, 1400);
         send_tcp_packet(s, TCP_PSH | TCP_ACK, data[sent..sent + chunk]);
-        s.seq_num +%= @truncate(chunk);
+        s.seq_num +%= @as(u32, @intCast(chunk));
         sent += chunk;
 
         // Brief pause to let ACKs flow

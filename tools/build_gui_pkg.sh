@@ -1,7 +1,11 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")/.."
-ZIG="${ZIG:-/opt/zig14/zig}"
+ZIG="${ZIG:-$(command -v zig 2>/dev/null || true)}"
+if [ -z "$ZIG" ] || [ ! -x "$ZIG" ]; then
+  echo "Zig compiler not found; set ZIG to a Zig 0.14+ executable." >&2
+  exit 127
+fi
 
 mkdir -p sample
 
@@ -85,11 +89,10 @@ cp sample/imgview.bin "$PKGDIR/bin/imgview"
 cp sample/play.bin "$PKGDIR/bin/play"
 cp sample/zide.bin "$PKGDIR/bin/zide"
 mkdir -p "$PKGDIR/assets"
-cp assets/wallpaper.raw "$PKGDIR/assets/wallpaper.raw"
-cp assets/folder.raw "$PKGDIR/assets/folder.raw"
-cp assets/file.raw "$PKGDIR/assets/file.raw"
-cp assets/app.raw "$PKGDIR/assets/app.raw"
-cp assets/cursor.raw "$PKGDIR/assets/cursor.raw"
+for asset in assets/*.raw; do
+  [ -f "$asset" ] || continue
+  cp "$asset" "$PKGDIR/assets/$(basename "$asset")"
+done
 python3 tools/pkgbuild.py sample/gui.fz gui 1.0 "ZigOS GUI Compositor" "$PKGDIR"
 rm -rf "$PKGDIR"
 

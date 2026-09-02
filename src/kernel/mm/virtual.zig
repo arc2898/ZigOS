@@ -2,7 +2,7 @@
 const std = @import("std");
 const pmem = @import("physical.zig");
 const serial = @import("../driver/serial.zig");
-const boot_abi = @import("../boot_abi.zig");
+const boot_abi = @import("boot_abi");
 
 pub const PAGE_SIZE: usize = 4096;
 pub const PAGE_PRESENT: u64 = 1 << 0;
@@ -25,7 +25,7 @@ pub var kernel_pml4_phys: usize = 0;
 pub var vmm_active: bool = false;
 
 pub fn switch_cr3(phys: usize) void {
-    asm volatile ("mov %[phys], %%cr3" : : [phys] "r" (phys) : .{ .memory = true });
+    asm volatile ("mov %[phys], %%cr3" : : [phys] "r" (phys) : "memory");
 }
 
 fn clear_table(phys: usize) void {
@@ -100,6 +100,14 @@ pub fn mapped_page_phys(pml4_phys: usize, virt: usize) usize {
     const entry = walk(pml4_phys, virt, false, false) orelse return 0;
     if ((entry.* & PAGE_PRESENT) == 0) return 0;
     return @as(usize, @truncate(entry.* & PHYS_MASK));
+}
+
+/// Returns the complete leaf PTE for `virt`, including permission bits.
+/// Physical page zero is reserved, so zero also denotes an unmapped page.
+pub fn page_flags(pml4_phys: usize, virt: usize) u64 {
+    const entry = walk(pml4_phys, virt, false, false) orelse return 0;
+    if ((entry.* & PAGE_PRESENT) == 0) return 0;
+    return entry.*;
 }
 
 pub fn map_mmio(pml4_phys: usize, virt: usize, phys: usize, size: usize) bool {
@@ -190,7 +198,7 @@ pub fn unmap_page(pml4_phys: usize, virt: usize) void {
         pmem.free_frame(phys);
         entry.* = 0;
         // Invalidate TLB
-        asm volatile ("invlpg (%[virt])" : : [virt] "r" (virt) : .{ .memory = true });
+        asm volatile ("invlpg (%[virt])" : : [virt] "r" (virt) : "memory");
     }
 }
 
@@ -270,6 +278,30 @@ pub fn destroy_table(phys: usize, level: u8) void {
     pmem.free_frame(phys);
 }
 
+fn destroy_low_table(phys: usize, level: u8, virt_base: usize) void {
+    const table = @as(*PageTable, @ptrFromInt(pmem.phys_to_virt(phys)));
+    const shift: u6 = switch (level) {
+        3 => 30,
+        2 => 21,
+        1 => 12,
+        else => 0,
+    };
+    var i: usize = 0;
+    while (i < 512) : (i += 1) {
+        if ((table[i] & PAGE_PRESENT) == 0) continue;
+        const child_phys = @as(usize, @truncate(table[i] & PHYS_MASK));
+        const child_virt = virt_base | (i << shift);
+        if (level > 1) {
+            destroy_low_table(child_phys, level - 1, child_virt);
+        } else if (child_virt >= KERNEL_IDENTITY_WINDOW_BYTES) {
+            // The low identity window aliases live kernel memory. All other
+            // leaves in this private pml4[0] subtree belong to the process.
+            pmem.free_frame(child_phys);
+        }
+    }
+    pmem.free_frame(phys);
+}
+
 pub fn destroy_address_space(pml4_phys: usize) void {
     if (pml4_phys == 0 or pml4_phys == kernel_pml4_phys) return;
     
@@ -282,7 +314,11 @@ pub fn destroy_address_space(pml4_phys: usize) void {
             // Skip mappings that are shared with kernel (like identity map in pml4[0])
             if (pml4[i] != k_pml4[i]) {
                 const child_phys = @as(usize, @truncate(pml4[i] & PHYS_MASK));
-                destroy_table(child_phys, 3);
+                if (i == 0) {
+                    destroy_low_table(child_phys, 3, 0);
+                } else {
+                    destroy_table(child_phys, 3);
+                }
             }
         }
     }

@@ -38,6 +38,7 @@ var next_id: TaskId = 1;
 pub fn init() void {
     current_idx = MAX_TASKS - 1;
     next_id = 1;
+    asm volatile ("fninit");
     for (0..MAX_TASKS) |i| {
         tasks[i].state = .free;
         tasks[i].id = 0;
@@ -67,6 +68,7 @@ pub fn create_task_from_regs(regs: *const idt.Registers, pml4: usize, name: []co
     t.name[name_len] = 0;
     
     t.saved = regs.*;
+    init_fpu_state(&t.fpu_state);
     
     return t.id;
 }
@@ -99,6 +101,7 @@ pub fn create_task_user(entry: u64, rsp: u64, pml4: usize, name: []const u8, pri
     t.saved.cs = gdt.SEL_UCODE;
     t.saved.ss = gdt.SEL_UDATA;
     t.saved.rflags = 0x202; // IF set
+    init_fpu_state(&t.fpu_state);
     
     return t.id;
 }
@@ -113,6 +116,14 @@ pub fn wake(taskId: TaskId) void {
             break;
         }
     }
+}
+
+fn init_fpu_state(state: *align(16) [512]u8) void {
+    asm volatile ("fninit\nfxsave (%[ptr])"
+        :
+        : [ptr] "r" (state)
+        : "memory"
+    );
 }
 
 fn next_ready_task() ?usize {
@@ -142,6 +153,7 @@ pub fn force_reschedule_manual() noreturn {
     current_idx = best_idx.?;
     const new_task = &tasks[current_idx];
     new_task.state = .running;
+    asm volatile ("fxrstor (%[ptr])" : : [ptr] "r" (&new_task.fpu_state) : "memory");
 
     const kernel_stack_top = gdt.interrupt_stack_top();
     gdt.set_tss_rsp0(kernel_stack_top);
@@ -160,7 +172,7 @@ pub fn yield() void {
 pub fn schedule(frame: *idt.Registers) void {
     if (current_task()) |t| {
         t.saved = frame.*;
-        asm volatile ("fxsave (%[ptr])" : : [ptr] "r" (&t.fpu_state) : .{ .memory = true });
+        asm volatile ("fxsave (%[ptr])" : : [ptr] "r" (&t.fpu_state) : "memory");
         if (t.state == .running) {
             t.state = .ready;
         }
@@ -176,7 +188,7 @@ pub fn schedule(frame: *idt.Registers) void {
         sys.sync_kstack_top(kernel_stack_top);
         
         frame.* = new_task.saved;
-        asm volatile ("fxrstor (%[ptr])" : : [ptr] "r" (&new_task.fpu_state) : .{ .memory = true });
+        asm volatile ("fxrstor (%[ptr])" : : [ptr] "r" (&new_task.fpu_state) : "memory");
         vmm.switch_cr3(new_task.pml4_phys);
     }
 }
@@ -216,8 +228,27 @@ pub fn kill_task(id: TaskId) bool {
     var i: usize = 0;
     while (i < MAX_TASKS) : (i += 1) {
         if (tasks[i].id == id and tasks[i].state != .free) {
-            tasks[i].state = .free;
+            // Keep the task record until its owning process is reaped. This
+            // prevents a zombie from leaking its kernel stack or being
+            // reused while waitpid still needs its identity.
+            tasks[i].state = .dead;
+            return true;
+        }
+    }
+    return false;
+}
+
+pub fn reap_task(id: TaskId) bool {
+    var i: usize = 0;
+    while (i < MAX_TASKS) : (i += 1) {
+        if (tasks[i].id == id and tasks[i].state != .free) {
+            if (tasks[i].kstack_phys != 0) {
+                pmem.free_frames(tasks[i].kstack_phys, 8);
+            }
+            tasks[i].kstack_phys = 0;
+            tasks[i].pml4_phys = 0;
             tasks[i].id = 0;
+            tasks[i].state = .free;
             return true;
         }
     }

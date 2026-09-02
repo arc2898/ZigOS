@@ -1,5 +1,5 @@
 const std = @import("std");
-const boot_abi = @import("../boot_abi.zig");
+const boot_abi = @import("boot_abi");
 const pmem = @import("../mm/physical.zig");
 const font = @import("font_data.zig");
 const ftfs = @import("ftfs.zig");
@@ -18,11 +18,12 @@ pub const Color = struct {
 
 var fb_info: *const boot_abi.BootInfo = undefined;
 var fb_base_virt: [*]volatile u32 = undefined;
+var enabled: bool = false;
 var wallpaper_data: ?[]const u8 = null;
 var cursor_data: ?[]const u8 = null;
 
-const WALLPAPER_WIDTH = 1024;
-const WALLPAPER_HEIGHT = 768;
+const WALLPAPER_WIDTH = 1280;
+const WALLPAPER_HEIGHT = 800;
 
 const Icon = struct {
     name: []const u8,
@@ -75,6 +76,11 @@ fn load_asset(path: []const u8) ?[]const u8 {
 
 pub fn init(info: *const boot_abi.BootInfo) void {
     fb_info = info;
+    enabled = info.fb_base != 0 and info.fb_width >= 100 and info.fb_height >= 40 and info.fb_pitch >= info.fb_width * 4;
+    if (!enabled) {
+        serial.log("GUI: no usable framebuffer; graphics disabled\n");
+        return;
+    }
     fb_base_virt = @ptrFromInt(pmem.phys_to_virt(info.fb_base));
     
     wallpaper_data = load_asset("/wallpaper.raw");
@@ -118,18 +124,18 @@ pub fn init(info: *const boot_abi.BootInfo) void {
 }
 
 pub fn draw_pixel(x: usize, y: usize, color: u32) void {
+    if (!enabled) return;
     if (x >= fb_info.fb_width or y >= fb_info.fb_height) return;
     const pitch = fb_info.fb_pitch / 4;
-    // The value is a little-endian u32 view of the physical byte order.
-    // GOP PixelBGR bytes are B,G,R,0 and therefore have the u32 value
-    // 0x00RRGGBB; GOP PixelRGB bytes are R,G,B,0 and require red/blue swap.
+    // color is canonical 0x00RRGGBB. A u32 write on little-endian x86
+    // already stores RGB framebuffer bytes in .rgb mode.
     if (fb_info.fb_format == boot_abi.PixelFormat.rgb) {
+        fb_base_virt[y * pitch + x] = color;
+    } else {
         const r = (color >> 16) & 0xFF;
         const g = (color >> 8) & 0xFF;
         const b = color & 0xFF;
         fb_base_virt[y * pitch + x] = (b << 16) | (g << 8) | r;
-    } else {
-        fb_base_virt[y * pitch + x] = color;
     }
 }
 
@@ -165,6 +171,7 @@ pub fn draw_str(s: []const u8, x: usize, y: usize, color: u32) void {
 }
 
 pub fn render_wallpaper() void {
+    if (!enabled) return;
     if (wallpaper_data) |data| {
         const raw_pixels = @as([*]const u32, @ptrCast(@alignCast(data.ptr)));
         var y: usize = 0;
@@ -188,6 +195,7 @@ pub fn render_wallpaper() void {
 }
 
 pub fn draw_desktop() void {
+    if (!enabled) return;
     const w = fb_info.fb_width;
     const h = fb_info.fb_height;
 
