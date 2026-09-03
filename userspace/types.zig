@@ -302,3 +302,56 @@ fn initPort(comptime name: []const u8) [MAX_PORT_NAME]u8 {
 
 /// Fixed-size path buffer used between shell and filesystem.
 pub const MAX_PATH: usize = 128;
+
+// types.zig (Additions)
+pub const MAX_PAYLOAD = 256;
+
+pub const MsgType = enum(u32) {
+    GUI_CREATE_WINDOW = 1,
+    GUI_DRAW_STRING   = 2,
+    GUI_FILL_RECT     = 3,
+    INPUT_KEY_DOWN    = 10,
+    INPUT_KEY_UP      = 11,
+    GUI_WINDOW_CLOSE  = 20,
+};
+
+pub const GuiCreateWindow = packed struct {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    shm_id: u32,
+};
+
+pub const GuiDrawString = packed struct {
+    window_id: u32,
+    x: i32,
+    y: i32,
+    color: u32,
+    text: [64]u8, // Max 63 chars per draw call
+};
+
+pub const GuiFillRect = packed struct {
+    window_id: u32,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    color: u32,
+};
+
+pub const KeyEvent = packed struct {
+    key: u32,    // Virtual Key Code (VK_*)
+    mods: u32,   // Bitmask: 1=Shift, 2=Ctrl, 4=Alt
+    scancode: u16,
+    _reserved: u16,
+};
+
+pub const Message = packed struct {
+    sender_id: u32,
+    receiver_id: u32,
+    msg_type: MsgType,
+    payload_len: u16,
+    _reserved: u16,
+    payload: [MAX_PAYLOAD]u8,
+};
