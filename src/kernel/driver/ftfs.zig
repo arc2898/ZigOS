@@ -420,4 +420,607 @@ pub const RaidProfile = enum(u64) {
 pub const ExtentTree = struct {
     root: *TreeRoot,
     
-    pub fn insert|
+    pub fn insertExtent(self: *ExtentTree, txn: *Transaction, key: Key, item: ExtentItem) !void {
+        try self.root.insert(txn, key, &item, @sizeOf(ExtentItem));
+    }
+    
+    pub fn findExtent(self: *ExtentTree, file_objectid: u64, file_offset: u64) ?ExtentItem {
+        const key = Key{ .objectid = file_objectid, .type = .extent_data, .offset = file_offset };
+        return self.root.findLe(key) orelse return null;
+    }
+    
+    pub fn removeExtent(self: *ExtentTree, txn: *Transaction, key: Key) !void {
+        try self.root.remove(txn, key);
+    }
+};
+
+// ============================================================================
+// B+ TREE IMPLEMENTATION (Generic, used by all trees)
+// ============================================================================
+
+pub const TreeRoot = struct {
+    fs: *FileSystem,
+    objectid: u64,
+    node: *Node,          // Cached root node
+    level: u8,
+    generation: u64,
+    
+    pub fn insert(self: *TreeRoot, txn: *Transaction, key: Key, data: *const u8, data_len: u32) !void {
+        var path = try Path.init(self.fs.block_allocator.allocator, self.level + 2);
+        defer path.deinit();
+        
+        try self.findPath(key, &path);
+        try self.insertAtPath(txn, &path, key, data, data_len);
+    }
+    
+    pub fn remove(self: *TreeRoot, txn: *Transaction, key: Key) !void {
+        var path = try Path.init(self.fs.block_allocator.allocator, self.level + 2);
+        defer path.deinit();
+        
+        try self.findPath(key, &path);
+        try self.removeAtPath(txn, &path, key);
+    }
+    
+    pub fn findLe(self: *TreeRoot, key: Key) ?*const u8 {
+        var path = try Path.init(self.fs.block_allocator.allocator, self.level + 2);
+        defer path.deinit();
+        
+        if (self.findPath(key, &path) == .not_found) return null;
+        // Return item data at path leaf
+        return null; // Simplified
+    }
+    
+    fn findPath(self: *TreeRoot, key: Key, path: *Path) Error!FindResult {
+        var node = self.node;
+        var level = self.level;
+        
+        while (level > 0) {
+            const idx = binarySearchInternal(node, key);
+            try path.push(node, idx, level);
+            
+            const ptr = node.itemPtr(idx);
+            const child_block = ptr.key.offset; // In internal nodes, offset = child block
+            node = try self.fs.readNode(child_block);
+            level -= 1;
+        }
+        
+        try path.push(node, binarySearchLeaf(node, key), 0);
+        return .found;
+    }
+    
+    fn insertAtPath(self: *TreeRoot, txn: *Transaction, path: *Path, key: Key, data: *const u8, data_len: u32) !void {
+        // Standard B+ tree insertion with splits
+        // COW nodes as we go up
+    }
+    
+    fn removeAtPath(self: *TreeRoot, txn: *Transaction, path: *Path, key: Key) !void {
+        // Standard B+ tree deletion with merges/redistribution
+    }
+};
+
+const Path = struct {
+    nodes: []*Node,
+    slots: []u32,
+    levels: []u8,
+    allocator: std.mem.Allocator,
+    
+    pub fn init(allocator: std.mem.Allocator, capacity: usize) !Path {
+        return .{
+            .nodes = try allocator.alloc(*Node, capacity),
+            .slots = try allocator.alloc(u32, capacity),
+            .levels = try allocator.alloc(u8, capacity),
+            .allocator = allocator,
+        };
+    }
+    
+    pub fn deinit(self: *Path) void {
+        self.allocator.free(self.nodes);
+        self.allocator.free(self.slots);
+        self.allocator.free(self.levels);
+    }
+    
+    pub fn push(self: *Path, node: *Node, slot: u32, level: u8) !void {
+        // Append to arrays
+    }
+};
+
+fn binarySearchInternal(node: *Node, key: Key) u32 {
+    // Binary search on internal node keys
+    return 0;
+}
+
+fn binarySearchLeaf(node: *Node, key: Key) u32 {
+    // Binary search on leaf node keys
+    return 0;
+}
+
+fn computeNodeChecksum(node: *Node) Checksum {
+    // Compute checksum of node (excluding csum field itself)
+    return .{ .type = 1, .size = 32, .padding = 0, .data = [_]u8{0} ** 32 };
+}
+
+// ============================================================================
+// FILESYSTEM CORE
+// ============================================================================
+
+pub const FileSystem = struct {
+    device: *BlockDevice,
+    block_allocator: BlockAllocator,
+    superblock: *Superblock,
+    root_tree: *TreeRoot,       // Tree of tree roots
+    extent_tree: *ExtentTree,
+    chunk_tree: *ChunkTree,
+    dev_tree: *DevTree,
+    fs_tree: *TreeRoot,         // Main filesystem tree (subvolumes)
+    log_tree: *LogTree,         // Journal/log tree for fsync
+    quota_tree: *QuotaTree,
+    free_space_trees: std.HashMap(u64, *FreeSpaceTree, ...),
+    
+    // Transaction state
+    current_transid: u64,
+    running_transaction: ?*Transaction,
+    commit_lock: std.Thread.Mutex,
+    
+    // In-memory caches
+    inode_cache: LruCache(u64, *Inode),
+    extent_cache: ExtentCache,
+    path_cache: PathCache,
+    
+    // Configuration
+    compress_type: CompressionType,
+    compress_level: u8,
+    max_inline: u32,
+    
+    pub const CompressionType = enum { NONE, ZLIB, LZO, ZSTD, LZ4 };
+    
+    pub fn format(device: *BlockDevice, opts: FormatOptions) !*FileSystem {
+        // 1. Write superblock(s)
+        // 2. Create root tree
+        // 3. Create extent tree
+        // 4. Create chunk tree with initial chunk
+        // 5. Create device tree
+        // 6. Create default subvolume (FS_TREE_OBJECTID)
+        // 7. Create root directory
+        // 8. Write all superblock copies
+        return error.NotImplemented;
+    }
+    
+    pub fn mount(device: *BlockDevice) !*FileSystem {
+        // 1. Read and validate superblock
+        // 2. Read root tree root
+        // 3. Read chunk tree, rebuild block group map
+        // 4. Read extent tree
+        // 5. Read device tree
+        // 6. Open default subvolume
+        // 7. Verify/repair if needed
+        // 8. Start cleaner thread, commit thread
+        return error.NotImplemented;
+    }
+    
+    pub fn unmount(self: *FileSystem) !void {
+        // 1. Commit current transaction
+        // 2. Flush all caches
+        // 3. Write superblock
+        // 4. Sync device
+        // 5. Free all structures
+    }
+    
+    pub fn sync(self: *FileSystem) !void {
+        // Force commit of current transaction
+        if (self.running_transaction) |txn| {
+            try txn.commit();
+        }
+        try self.device.sync();
+    }
+    
+    fn next_transid(self: *FileSystem) u64 {
+        const transid = self.current_transid + 1;
+        self.current_transid = transid;
+        return transid;
+    }
+    
+    fn readNode(self: *FileSystem, block: u64) !*Node {
+        const buf = try self.device.readBlock(block);
+        const node = @ptrCast(*Node, buf.ptr);
+        // Verify checksum
+        if (!verifyNodeChecksum(node)) return error.ChecksumMismatch;
+        return node;
+    }
+    
+    fn writeSuperblock(self: *FileSystem) !void {
+        // Write to all superblock mirrors
+    }
+};
+
+// ============================================================================
+// SUPERBLOCK
+// ============================================================================
+
+pub const Superblock = packed struct {
+    csum: Checksum,
+    fsid: [16]u8,              // Filesystem UUID
+    bytenr: u64,               // This superblock's block number
+    magic: u64,                // FS_MAGIC
+    version: u64,
+    generation: u64,           // Last committed transaction
+    root_tree_bytenr: u64,     // Root tree root block
+    root_tree_level: u8,
+    chunk_tree_bytenr: u64,
+    chunk_tree_level: u8,
+    log_tree_bytenr: u64,
+    log_tree_level: u8,
+    total_bytes: u64,
+    bytes_used: u64,
+    root_dir_objectid: u64,
+    num_devices: u64,
+    sectorsize: u32,
+    nodesize: u32,
+    leafsize: u32,
+    stripesize: u32,
+    sys_chunk_array_size: u32,
+    chunk_root_generation: u64,
+    compat_flags: u64,
+    compat_ro_flags: u64,
+    incompat_flags: u64,
+    csum_type: u16,
+    root_level: u8,
+    label: [256]u8,
+    cache_generation: u64,
+    uuid_tree_generation: u64,
+    metadata_uuid: [16]u8,
+    reserved: [188]u8,
+};
+
+// ============================================================================
+// INODE & VFS INTERFACE
+// ============================================================================
+
+pub const Inode = struct {
+    fs: *FileSystem,
+    key: Key,                 // (objectid, INODE_ITEM, 0)
+    item: InodeItem,
+    dirty: bool,
+    refcount: usize,
+    // Runtime state
+    extent_map: ExtentMap,    // Cached extent mappings
+    xattrs: XattrCache,
+    i_lock: std.Thread.Mutex,
+    
+    pub fn read(self: *Inode, offset: u64, buf: []u8) !usize {
+        // 1. Find extents covering [offset, offset+buf.len)
+        // 2. For each extent: read from device, verify checksum, decompress if needed
+        // 3. Handle holes (return zeros)
+        return 0;
+    }
+    
+    pub fn write(self: *Inode, txn: *Transaction, offset: u64, data: []const u8) !usize {
+        // 1. Allocate extents for new data (COW)
+        // 2. Compress if enabled and beneficial
+        // 3. Write data blocks
+        // 4. Insert extent items
+        // 5. Update inode size/nbytes
+        // 6. Mark inode dirty
+        return 0;
+    }
+    
+    pub fn truncate(self: *Inode, txn: *Transaction, new_size: u64) !void {
+        // Remove extents beyond new_size
+        // Update inode
+    }
+    
+    pub fn fsync(self: *Inode, txn: *Transaction) !void {
+        // Ensure all data and metadata for this inode is on disk
+        // Use log tree for fast fsync
+    }
+    
+    pub fn getAttr(self: *Inode) Attr {
+        return .{
+            .size = self.item.size,
+            .blocks = self.item.block_count,
+            .mode = self.item.mode,
+            .uid = self.item.uid,
+            .gid = self.item.gid,
+            .rdev = self.item.rdev,
+            .nlink = self.item.nlink,
+            .atime = self.item.atime,
+            .mtime = self.item.mtime,
+            .ctime = self.item.ctime,
+            .crtime = self.item.otime,
+            .flags = self.item.flags,
+        };
+    }
+};
+
+pub const Attr = struct {
+    size: u64,
+    blocks: u64,
+    mode: u32,
+    uid: u32,
+    gid: u32,
+    rdev: u64,
+    nlink: u32,
+    atime: Timespec,
+    mtime: Timespec,
+    ctime: Timespec,
+    crtime: Timespec,
+    flags: u64,
+};
+
+// ============================================================================
+// DIRECTORY OPERATIONS
+// ============================================================================
+
+pub const DirHandle = struct {
+    inode: *Inode,
+    offset: u64,
+    key: Key,                 // Current directory entry key
+    
+    pub fn readDir(self: *DirHandle, buf: []DirEntry) !usize {
+        // Iterate DIR_INDEX and DIR_ITEM keys in parent inode
+        // Return directory entries
+        return 0;
+    }
+};
+
+pub const DirEntry = struct {
+    ino: u64,
+    off: u64,
+    type: u8,                 // DT_REG, DT_DIR, etc.
+    name: []const u8,
+};
+
+// ============================================================================
+// SNAPSHOT & SUBVOLUME SUPPORT
+// ============================================================================
+
+pub const Subvolume = struct {
+    fs: *FileSystem,
+    root_item: RootItem,
+    root_tree: *TreeRoot,
+    id: u64,
+    parent_id: u64,
+    name: []const u8,
+    path: []const u8,
+    flags: u64,
+    readonly: bool,
+    
+    pub fn snapshot(self: *Subvolume, name: []const u8, readonly: bool) !*Subvolume {
+        // 1. Create new root item pointing to same tree root
+        // 2. Increment root ref count
+        // 3. Insert root_ref/root_backref in root tree
+        // 4. Create new subvolume object
+        return error.NotImplemented;
+    }
+    
+    pub fn delete(self: *Subvolume) !void {
+        // 1. Drop root reference
+        // 2. If refcount == 0, schedule tree for deletion (via qgroup/cleaner)
+        // 3. Remove root_ref/backref
+    }
+};
+
+// ============================================================================
+// QUOTA & QGROUP SUPPORT
+// ============================================================================
+
+pub const QuotaTree = struct {
+    root: *TreeRoot,
+    
+    pub fn reserve(self: *QuotaTree, qgroupid: u64, bytes: u64) !bool {
+        // Check and reserve space in qgroup
+        return true;
+    }
+    
+    pub fn release(self: *QuotaTree, qgroupid: u64, bytes: u64) !void {
+        // Release reservation
+    }
+};
+
+// ============================================================================
+// FREE SPACE MANAGEMENT
+// ============================================================================
+
+pub const FreeSpaceTree = struct {
+    root: *TreeRoot,
+    block_group: *BlockGroup,
+    
+    // Free space entries: (offset, length) in block group
+    // Can use extent items or bitmap items
+};
+
+// ============================================================================
+// CHECKSUM & COMPRESSION
+// ============================================================================
+
+pub const CsumTree = struct {
+    root: *TreeRoot,
+    // Keys: (EXTENT_CSUM, bytenr, 0) -> list of checksums for each block
+};
+
+fn computeDataChecksum(data: []const u8, type: u8) Checksum {
+    // Compute checksum based on type (crc32c, xxhash, sha256, blake2)
+    return .{ .type = type, .size = 32, .padding = 0, .data = [_]u8{0} ** 32 };
+}
+
+fn compressData(data: []const u8, type: CompressionType, level: u8) ![]u8 {
+    // Compress data, return compressed buffer
+    return data;
+}
+
+fn decompressData(data: []const u8, type: CompressionType, uncompressed_size: u64) ![]u8 {
+    // Decompress data
+    return data;
+}
+
+// ============================================================================
+// DEVICE LAYER ABSTRACTION
+// ============================================================================
+
+pub const BlockDevice = struct {
+    readBlock: fn(ctx: *anyopaque, block: u64) ![]u8,
+    writeBlock: fn(ctx: *anyopaque, block: u64, data: []const u8) !void,
+    sync: fn(ctx: *anyopaque) !void,
+    flush: fn(ctx: *anyopaque) !void,
+    block_size: u32,
+    total_blocks: u64,
+    ctx: *anyopaque,
+    
+    pub fn readBlock(self: *BlockDevice, block: u64) ![]u8 {
+        return self.readBlock(self.ctx, block);
+    }
+    
+    pub fn writeBlock(self: *BlockDevice, block: u64, data: []const u8) !void {
+        return self.writeBlock(self.ctx, block, data);
+    }
+};
+
+// ============================================================================
+// FORMAT OPTIONS
+// ============================================================================
+
+pub const FormatOptions = struct {
+    block_size: u32 = BLOCK_SIZE,
+    nodesize: u32 = BLOCK_SIZE,
+    leafsize: u32 = BLOCK_SIZE,
+    sectorsize: u32 = 4096,
+    metadata_profile: RaidProfile = .SINGLE,
+    data_profile: RaidProfile = .SINGLE,
+    label: []const u8 = "",
+    features: Features = .default(),
+    uuid: ?[16]u8 = null,
+    
+    pub const Features = struct {
+        incompat: u64 = 0,
+        compat: u64 = 0,
+        compat_ro: u64 = 0,
+        
+        pub const DEFAULT = .{};
+        
+        pub fn default() Features {
+            return .{
+                .incompat = 0,
+                .compat = 0,
+                .compat_ro = 0,
+            };
+        }
+    };
+};
+
+// ============================================================================
+// CACHES
+// ============================================================================
+
+pub const LruCache = struct {
+    // Generic LRU cache implementation
+};
+
+pub const ExtentCache = struct {
+    // Radix tree or interval tree for extent mappings
+};
+
+pub const PathCache = struct {
+    // Dentry cache for path resolution
+};
+
+pub const XattrCache = struct {
+    // Extended attribute cache
+};
+
+// ============================================================================
+// CLEANER & MAINTENANCE
+// ============================================================================
+
+pub const Cleaner = struct {
+    fs: *FileSystem,
+    thread: std.Thread,
+    
+    pub fn start(self: *Cleaner) !void {
+        // Background thread for:
+        // - Deleting dropped snapshots/subvolumes
+        // - Cleaning up orphaned extents
+        // - Defragmentation
+        // - Balance operations
+    }
+    
+    pub fn run(self: *Cleaner) void {
+        while (true) {
+            std.time.sleep(30 * std.time.ns_per_s);
+            // Do cleanup work
+        }
+    }
+};
+
+// ============================================================================
+// VFS INTEGRATION POINTS
+// ============================================================================
+
+pub const VfsOps = struct {
+    // open, close, read, write, lseek
+    // mkdir, rmdir, unlink, rename, link, symlink
+    // stat, fstat, chmod, chown, utimensat
+    // readdir, getdents
+    // fsync, fdatasync
+    // ioctl (for FS-specific ops: snapshot, defrag, quota, etc.)
+    // xattr ops: setxattr, getxattr, listxattr, removexattr
+    // fallocate (preallocate, punch hole, zero range)
+    // copy_file_range, splice
+    // mount, umount, statfs
+};
+
+// ============================================================================
+// RECOVERY & REPAIR
+// ============================================================================
+
+pub const Fsck = struct {
+    fs: *FileSystem,
+    
+    pub fn check(self: *Fsck, repair: bool) !FsckResult {
+        // 1. Verify all tree structures
+        // 2. Check extent accounting (refcounts, backrefs)
+        // 3. Verify checksums on all data/metadata
+        // 4. Check quota consistency
+        // 5. Verify free space accounting
+        // 6. If repair: fix issues, rebuild trees
+        return .{ .errors_found = 0, .errors_fixed = 0 };
+    }
+};
+
+pub const FsckResult = struct {
+    errors_found: u64,
+    errors_fixed: u64,
+    data_loss: bool,
+};
+
+// ============================================================================
+// USAGE EXAMPLE
+// ============================================================================
+
+pub fn exampleUsage() !void {
+    // Format
+    const device = try openBlockDevice("/dev/sda1");
+    const fs = try FileSystem.format(device, .{});
+    defer fs.unmount();
+    
+    // Mount
+    const fs2 = try FileSystem.mount(device);
+    defer fs2.unmount();
+    
+    // Create file
+    const root_inode = try fs2.openInode(ROOT_DIR_OBJECTID);
+    var txn = try fs2.startTransaction();
+    defer txn.commit() catch |err| { txn.abort(); return err; };
+    
+    const file_inode = try root_inode.createFile(txn, "hello.txt", 0o644);
+    try file_inode.write(txn, 0, "Hello, FTFS v2!\n");
+    try file_inode.fsync(txn);
+    
+    // Snapshot
+    const subvol = try fs2.getSubvolume(FS_TREE_OBJECTID);
+    const snap = try subvol.snapshot("snap1", false);
+    
+    // Read back
+    const file2 = try root_inode.lookup("hello.txt");
+    var buf: [100]u8 = undefined;
+    const n = try file2.read(0, &buf);
+    serial.log(@as([]const u8, buf[0..n]));
+}
